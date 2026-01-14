@@ -6,6 +6,9 @@ wave/
 doc/
 *.f
 
+### Verilator
+obj_dir/
+
 ### Vivado
 .Xil
 project
