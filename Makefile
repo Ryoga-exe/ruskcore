@@ -2,7 +2,7 @@ PROJECT = ruskcore
 FILELIST = $(PROJECT).f
 
 TOP_MODULE = top
-TB_PROGRAM = src/tb_verilator.cpp
+TB_PROGRAM = test/tb_verilator.cpp
 OBJ_DIR = obj_dir/
 SIM_NAME = sim
 VERILATOR_FLAGS = ""
