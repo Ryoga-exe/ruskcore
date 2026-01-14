@@ -1,6 +1,7 @@
+/// Memory module
 module memory::<DATA_WIDTH: u32, ADDR_WIDTH: u32> #(
-    param FILEPATH_IS_ENV: logic  = 0 ,
-    param FILEPATH       : string = "",
+    param FILEPATH_IS_ENV: logic  = 0 , /// Whether FILEPATH is an environment variable name
+    param FILEPATH       : string = "", /// Path to the file for memory initialization, or environment variable name
 ) (
     clk   : input   clock                                     ,
     rst   : input   reset                                     ,
