@@ -2,6 +2,5 @@
 name = "ruskcore"
 version = "0.1.0"
 [build]
-source = "src"
+sources = ["src"]
 target = { type = "directory", path = "target" }
-
