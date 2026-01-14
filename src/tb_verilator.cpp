@@ -1,7 +1,8 @@
-#include "Vcore_top.h"
+#include "Vruskcore_top.h"
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
-#include <stdlib.h>
+#include <string>
 #include <verilated.h>
 
 namespace fs = std::filesystem;
@@ -49,7 +50,7 @@ int main(int argc, char **argv) {
   setenv("MEMORY_FILE_PATH", memory_file_path.c_str(), 1);
 
   // top
-  Vcore_top *dut = new Vcore_top();
+  Vruskcore_top *dut = new Vruskcore_top();
 
   // reset
   dut->clk = 0;
