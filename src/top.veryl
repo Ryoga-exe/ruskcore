@@ -4,8 +4,10 @@ module top #(
     param MEMORY_FILEPATH_IS_ENV: bit    = 1                 ,
     param MEMORY_FILEPATH       : string = "MEMORY_FILE_PATH",
 ) (
-    clk: input clock,
-    rst: input reset,
+    #[ifdef(TEST_MODE)]
+    test_success: output bit  ,
+    clk         : input  clock,
+    rst         : input  reset,
 ) {
     // address to memory address in data units
     function addr_to_memaddr (
@@ -69,4 +71,24 @@ module top #(
         i_membus  ,
         d_membus  ,
     );
+
+    // riscv-test
+    const RISCVTESTS_TOHOST_ADDR: Addr = 'h1000 as Addr;
+    #[ifdef(TEST_MODE)]
+    always_ff {
+        if d_membus.valid && d_membus.ready {
+            case d_membus.addr {
+                RISCVTESTS_TOHOST_ADDR: if d_membus.wen == 1 && d_membus.wdata[lsb] == 1'b1 {
+                    test_success = d_membus.wdata == 1;
+                    if d_membus.wdata == 1 {
+                        $display("riscv-tests success!");
+                    } else {
+                        $display("riscv-tests failed!");
+                        $error  ("wdata : %h", d_membus.wdata);
+                    }
+                    $finish();
+                }
+            }
+        }
+    }
 }
