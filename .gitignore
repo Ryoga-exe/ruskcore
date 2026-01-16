@@ -9,6 +9,9 @@ doc/
 ### Verilator
 obj_dir/
 
+### Test
+results
+
 ### Vivado
 .Xil
 project
