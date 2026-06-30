@@ -20,7 +20,8 @@ module csrunit (
     // ECALL inst?
     let is_ecall: logic = ctrl.is_csr && csr_addr == 0 && rs1[4:0] == 0 && ctrl.funct3 == 0 && rd_addr == 0;
     // MRET inst?
-    let is_mret: logic = ctrl.is_csr && csr_addr == 12'b0011000_00010 && rs1[4:0] == 0 && ctrl.funct3 == 0 && rd_addr == 0;
+    let is_mret: logic = ctrl.is_csr && csr_addr == 12'b0011000_00010 && rs1[4:0] == 0 && ctrl.funct3 == 0 && rd_addr
+        == 0;
 
     // wmasks
     const MTVEC_WMASK : UIntX = 'hffff_fffc;
@@ -51,12 +52,21 @@ module csrunit (
             default        : 0,
         };
         wdata = case ctrl.funct3[1:0] {
-            2'b01  : rs1,
-            2'b10  : rdata | rs1,
-            2'b11  : rdata & ~rs1,
-            default: 'x,
-        } & wmask | (rdata & ~wmask);
+                2'b01  : rs1,
+                2'b10  : rdata | rs1,
+                2'b11  : rdata & ~rs1,
+                default: 'x,
+            } & wmask | (rdata & ~wmask);
     }
+
+    // Exception
+    let raise_expt: logic = valid && is_ecall;
+    let expt_cause: UIntX = CsrCause::ENVIRONMENT_CALL_FROM_M_MODE;
+
+    // Trap
+    assign raise_trap = raise_expt || (valid && is_mret);
+    let trap_cause: UIntX = expt_cause;
+    assign trap_vector = if raise_expt ? mtvec : mepc;
 
     always_ff {
         if_reset {
@@ -84,13 +94,4 @@ module csrunit (
             }
         }
     }
-
-    // Exception
-    let raise_expt: logic = valid && is_ecall;
-    let expt_cause: UIntX = CsrCause::ENVIRONMENT_CALL_FROM_M_MODE;
-
-    // Trap
-    assign raise_trap  = raise_expt || (valid && is_mret);
-    let trap_cause : UIntX = expt_cause;
-    assign trap_vector = if raise_expt ? mtvec : mepc;
 }

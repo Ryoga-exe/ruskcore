@@ -7,14 +7,6 @@ module core (
     i_membus: modport membus_if::<ILEN, XLEN>::master          ,
     d_membus: modport membus_if::<MEM_DATA_WIDTH, XLEN>::master,
 ) {
-    // ====================================================
-    // * FIFO
-    // ====================================================
-    struct if_fifo_type {
-        addr: Addr,
-        bits: Inst,
-    }
-
     var if_fifo_wready    : logic       ;
     var if_fifo_wready_two: logic       ;
     var if_fifo_wvalid    : logic       ;
@@ -22,6 +14,44 @@ module core (
     var if_fifo_rready    : logic       ;
     var if_fifo_rvalid    : logic       ;
     var if_fifo_rdata     : if_fifo_type;
+
+    var if_pc          : Addr ; // program counter
+    var if_is_requested: logic; // fetch 中か
+    var if_pc_requested: Addr ; // 要求アドレス
+
+    let if_pc_next: Addr = if_pc + 4;
+
+    var control_hazard        : logic;
+    var control_hazard_pc_next: Addr ;
+
+    var memu_rdata: UIntX;
+    var memu_stall: logic;
+
+    let inst_valid : logic    = if_fifo_rvalid;
+    let inst_pc    : Addr     = if_fifo_rdata.addr;
+    let inst_bits  : Inst     = if_fifo_rdata.bits;
+    var inst_is_new: logic   ; // Whether the instruction was issued in the current clock cycle
+    var inst_ctrl  : InstCtrl;
+    var inst_imm   : UIntX   ;
+
+    var csru_rdata      : UIntX;
+    var csru_raise_trap : logic;
+    var csru_trap_vector: Addr ;
+
+    var op1       : UIntX;
+    var op2       : UIntX;
+    var alu_result: UIntX;
+
+    var brunit_take: logic;
+
+
+    // ====================================================
+    // * FIFO
+    // ====================================================
+    struct if_fifo_type {
+        addr: Addr,
+        bits: Inst,
+    }
 
     inst if_fifo: fifo #(
         DATA_TYPE: if_fifo_type,
@@ -64,15 +94,6 @@ module core (
     // ====================================================
     // * Instruction Fetch
     // ====================================================
-    var if_pc          : Addr ; // program counter
-    var if_is_requested: logic; // fetch 中か
-    var if_pc_requested: Addr ; // 要求アドレス
-
-    let if_pc_next: Addr = if_pc + 4;
-
-    var control_hazard        : logic;
-    var control_hazard_pc_next: Addr ;
-
     always_comb {
         // FIFO に 2 個以上空きがあるとき fetch
         i_membus.valid = if_fifo_wready_two;
@@ -112,7 +133,8 @@ module core (
         }
     }
 
-    assign control_hazard         = inst_valid && (csru_raise_trap || inst_ctrl.is_jump || inst_is_br(inst_ctrl) && brunit_take);
+    assign control_hazard         = inst_valid
+        && (csru_raise_trap || inst_ctrl.is_jump || inst_is_br(inst_ctrl) && brunit_take);
     assign control_hazard_pc_next = switch {
         csru_raise_trap      : csru_trap_vector, // jump trap_vector when traps
         inst_is_br(inst_ctrl): inst_pc + inst_imm,
@@ -122,18 +144,7 @@ module core (
     // ====================================================
     // * Instruction Decoder
     // ====================================================
-    let inst_valid : logic    = if_fifo_rvalid;
-    let inst_pc    : Addr     = if_fifo_rdata.addr;
-    let inst_bits  : Inst     = if_fifo_rdata.bits;
-    var inst_is_new: logic   ; // Whether the instruction was issued in the current clock cycle
-    var inst_ctrl  : InstCtrl;
-    var inst_imm   : UIntX   ;
-
-    inst decoder: inst_decoder (
-        bits: inst_bits,
-        ctrl: inst_ctrl,
-        imm : inst_imm ,
-    );
+    inst decoder: inst_decoder ( bits: inst_bits, ctrl: inst_ctrl, imm: inst_imm );
 
     always_ff {
         if_reset {
@@ -175,10 +186,6 @@ module core (
     // ====================================================
     // * ALU
     // ====================================================
-    var op1       : UIntX;
-    var op2       : UIntX;
-    var alu_result: UIntX;
-
     always_comb {
         case inst_ctrl.itype {
             InstType::R, InstType::B: {
@@ -200,19 +207,11 @@ module core (
         }
     }
 
-    inst alum: alu (
-        ctrl  : inst_ctrl ,
-        op1               ,
-        op2               ,
-        result: alu_result,
-    );
+    inst alum: alu ( ctrl: inst_ctrl, op1, op2, result: alu_result );
 
     // ====================================================
     // * Memory
     // ====================================================
-    var memu_rdata: UIntX;
-    var memu_stall: logic;
-
     inst memu: memunit (
         clk                ,
         rst                ,
@@ -229,22 +228,11 @@ module core (
     // ====================================================
     // * Brunit
     // ====================================================
-    var brunit_take: logic;
-
-    inst bru: brunit (
-        funct3: inst_ctrl.funct3,
-        op1                     ,
-        op2                     ,
-        take  : brunit_take     ,
-    );
+    inst bru: brunit ( funct3: inst_ctrl.funct3, op1, op2, take: brunit_take );
 
     // ====================================================
     // * CSR
     // ====================================================
-    var csru_rdata      : UIntX;
-    var csru_raise_trap : logic;
-    var csru_trap_vector: Addr ;
-
     inst csru: csrunit (
         clk                       ,
         rst                       ,
@@ -253,11 +241,16 @@ module core (
         ctrl    : inst_ctrl       ,
         rd_addr                   ,
         csr_addr: inst_bits[31:20],
-        rs1     : if inst_ctrl.funct3[2] == 1 && inst_ctrl.funct3[1:0] != 0 ? {1'b0 repeat XLEN - $bits(rs1_addr), rs1_addr} // expand rs1 with 0
-         : rs1_data,
-        rdata      : csru_rdata                                                                                                           ,
-        raise_trap : csru_raise_trap                                                                                                      ,
-        trap_vector: csru_trap_vector                                                                                                     ,
+        rs1     : if inst_ctrl.funct3[2] == 1 && inst_ctrl.funct3[1:0] != 0 ?
+            {
+                1'b0 repeat XLEN - $bits(rs1_addr), rs1_addr
+            } // expand rs1 with 0
+        :
+            rs1_data
+        ,
+        rdata      : csru_rdata      ,
+        raise_trap : csru_raise_trap ,
+        trap_vector: csru_trap_vector,
     );
 
     // ====================================================
