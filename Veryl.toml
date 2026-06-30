@@ -1,6 +1,10 @@
 [project]
 name = "ruskcore"
 version = "0.1.0"
+authors = ["Ryoga-exe"]
+description = "A RISC-V CPU written in Veryl."
+repository = "https://github.com/Ryoga-exe/ruskcore"
+
 [build]
 sources = ["src"]
 target = { type = "directory", path = "target" }
