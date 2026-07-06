@@ -7,6 +7,11 @@ module core (
     i_membus: modport membus_if::<ILEN, XLEN>::master          ,
     d_membus: modport membus_if::<MEM_DATA_WIDTH, XLEN>::master,
 ) {
+    struct if_fifo_type {
+        addr: Addr,
+        bits: Inst,
+    }
+
     var if_fifo_wready    : logic       ;
     var if_fifo_wready_two: logic       ;
     var if_fifo_wvalid    : logic       ;
@@ -48,11 +53,6 @@ module core (
     // ====================================================
     // * FIFO
     // ====================================================
-    struct if_fifo_type {
-        addr: Addr,
-        bits: Inst,
-    }
-
     inst if_fifo: fifo #(
         DATA_TYPE: if_fifo_type,
         WIDTH    : 3           ,
@@ -100,6 +100,7 @@ module core (
         i_membus.addr  = if_pc;
         i_membus.wen   = 0;
         i_membus.wdata = 'x; // no use
+        i_membus.wmask = 0;
 
         if_fifo_rready = !memu_stall; // memunit が処理中でないとき、FIFO から命令を取り出す
     }
@@ -240,6 +241,7 @@ module core (
         pc      : inst_pc         ,
         ctrl    : inst_ctrl       ,
         rd_addr                   ,
+        rs1_addr                  ,
         csr_addr: inst_bits[31:20],
         rs1     : if inst_ctrl.funct3[2] == 1 && inst_ctrl.funct3[1:0] != 0 ?
             {
