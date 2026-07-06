@@ -56,6 +56,9 @@ module fifo #(
             if_reset {
                 head = 0;
                 tail = 0;
+                for i in 0..2 ** WIDTH {
+                    mem[i] = 0;
+                }
             } else {
                 if flush {
                     head = 0;
