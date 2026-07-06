@@ -16,10 +16,10 @@ module brunit (
         case funct3 {
             3'b000 : take = beq; // BEQ (==)
             3'b001 : take = !beq; // BNE (!=)
-            3'b100 : take = blt; // BLT (<= with signed)
-            3'b101 : take = !blt; // BGE (> with signed)
-            3'b110 : take = bltu; // BLTU (<=)
-            3'b111 : take = !bltu; // BGEU (>)
+            3'b100 : take = blt; // BLT (< with signed)
+            3'b101 : take = !blt; // BGE (>= with signed)
+            3'b110 : take = bltu; // BLTU (<)
+            3'b111 : take = !bltu; // BGEU (>=)
             default: take = 0;
         }
     }
