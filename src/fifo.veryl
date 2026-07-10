@@ -53,20 +53,22 @@ module fifo #(
         }
 
         always_ff {
+            if !flush && wready && wvalid {
+                mem[tail] = wdata;
+            }
+        }
+
+        always_ff {
             if_reset {
                 head = 0;
                 tail = 0;
-                for i in 0..2 ** WIDTH {
-                    mem[i] = 0;
-                }
             } else {
                 if flush {
                     head = 0;
                     tail = 0;
                 } else {
                     if wready && wvalid {
-                        mem[tail] =  wdata;
-                        tail      += 1;
+                        tail += 1;
                     }
                     if rready && rvalid {
                         head += 1;
