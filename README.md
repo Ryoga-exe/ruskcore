@@ -6,6 +6,12 @@ A RISC-V CPU written in Veryl.
 
 Zig, Veryl, and Verilator are required.
 
+Initialize the RISC-V test sources after cloning the repository.
+
+```sh
+git submodule update --init --recursive
+```
+
 ```sh
 # Generate SystemVerilog with Veryl
 zig build
@@ -19,14 +25,22 @@ zig build run -- path/to/memory.hex 1000
 
 ## Test
 
-By default, `zig build test` recursively runs the `.hex` files under `test/share/riscv-tests`.
-A different directory and optional filename filters can be passed after `--`.
-
 ```sh
+# Build all test images without running them
+zig build riscv-tests
+
+# Run all tests (the command fails while any test is failing)
 zig build test
-zig build test -- path/to/tests
-zig build test -- path/to/tests rv32ui rv32mi
+
+# Change the maximum simulation cycles per test (0 disables the limit)
+zig build test -Dtest-cycles=2000000
+
+# Build or run tests whose fully-qualified names contain the filter
+zig build riscv-tests -- rv32mi
+zig build test -- add
 ```
+
+The test runner prints every PASS/FAIL result and writes the summary and per-test simulator output under `zig-out/test-results`.
 
 ## Utilities
 

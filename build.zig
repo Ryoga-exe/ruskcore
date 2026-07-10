@@ -1,5 +1,18 @@
 const std = @import("std");
 
+const TestSuite = struct {
+    name: []const u8,
+    llvm_weak_global_compat: bool = false,
+};
+
+const test_suites = [_]TestSuite{
+    .{ .name = "rv32ui" },
+    .{
+        .name = "rv32mi",
+        .llvm_weak_global_compat = true,
+    },
+};
+
 pub fn build(b: *std.Build) void {
     const veryl_fmt = b.addSystemCommand(&.{ "veryl", "fmt" });
     const fmt_step = b.step("fmt", "Format the Veryl sources");
@@ -29,23 +42,110 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the simulator (default: test/sample.hex)");
     run_step.dependOn(&run_simulator.step);
 
-    const test_simulator = addSimulator(b, veryl_build, true);
-    const test_runner = addHostTool(b, "test-runner", "tools/test_runner.zig");
-    const run_tests = b.addRunArtifact(test_runner);
-    run_tests.addFileArg(test_simulator);
-    if (b.args) |args| {
-        run_tests.addArgs(args);
-    } else {
-        run_tests.addArg("test/share/riscv-tests");
-    }
-    const test_step = b.step("test", "Run RISC-V tests with Verilator");
-    test_step.dependOn(&run_tests.step);
-
     const bin2hex = addHostTool(b, "bin2hex", "tools/bin2hex.zig");
     const run_bin2hex = b.addRunArtifact(bin2hex);
     if (b.args) |args| run_bin2hex.addArgs(args);
     const bin2hex_step = b.step("bin2hex", "Convert a binary file to a hex memory image");
     bin2hex_step.dependOn(&run_bin2hex.step);
+
+    const test_simulator = addSimulator(b, veryl_build, true);
+    const test_runner = addHostTool(b, "test-runner", "tools/test_runner.zig");
+    const test_cycles = b.option(
+        u64,
+        "test-cycles",
+        "Maximum simulation cycles per RISC-V test (0 for no limit)",
+    ) orelse 1_000_000;
+    const test_images = b.addWriteFiles();
+    const run_tests = b.addRunArtifact(test_runner);
+    run_tests.addFileArg(test_simulator);
+    run_tests.addArg(b.getInstallPath(.prefix, "test-results"));
+    run_tests.addArg(b.fmt("{d}", .{test_cycles}));
+    run_tests.addDirectoryArg(test_images.getDirectory());
+    run_tests.has_side_effects = true;
+    const build_tests_step = b.step("riscv-tests", "Build the RISC-V test images");
+    const test_step = b.step("test", "Run the RISC-V tests with Verilator");
+    const filters = b.args orelse &.{};
+    var selected_tests: usize = 0;
+    for (test_suites) |suite| {
+        const directory = b.fmt("third_party/riscv-tests/isa/{s}", .{suite.name});
+        const io = b.graph.io;
+        var dir = b.build_root.handle.openDir(io, directory, .{ .iterate = true }) catch
+            @panic("unable to open RISC-V test suite");
+        defer dir.close(io);
+        var iterator = dir.iterate();
+        while (iterator.next(io) catch @panic("unable to enumerate RISC-V tests")) |entry| {
+            if (entry.kind != .file or !std.mem.endsWith(u8, entry.name, ".S")) continue;
+            const name = std.fs.path.stem(entry.name);
+            const test_name = b.fmt("{s}-p-{s}", .{ suite.name, name });
+            if (!matchesAnyFilter(test_name, filters)) continue;
+            selected_tests += 1;
+
+            const image = addRiscvTest(b, bin2hex, suite, name);
+            _ = test_images.addCopyFile(image, b.fmt("{s}.hex", .{test_name}));
+        }
+    }
+    if (selected_tests == 0) {
+        const no_tests = b.addFail("no RISC-V tests matched the supplied filters");
+        build_tests_step.dependOn(&no_tests.step);
+        test_step.dependOn(&no_tests.step);
+    } else {
+        build_tests_step.dependOn(&test_images.step);
+        test_step.dependOn(&run_tests.step);
+    }
+}
+
+fn addRiscvTest(
+    b: *std.Build,
+    bin2hex: *std.Build.Step.Compile,
+    suite: TestSuite,
+    name: []const u8,
+) std.Build.LazyPath {
+    const target = b.resolveTargetQuery(.{
+        .cpu_arch = .riscv32,
+        .cpu_model = .{ .explicit = &std.Target.riscv.cpu.generic_rv32 },
+        .os_tag = .freestanding,
+        .abi = .none,
+    });
+    const test_name = b.fmt("{s}-p-{s}", .{ suite.name, name });
+    const module = b.createModule(.{
+        .root_source_file = null,
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+    module.addAssemblyFile(b.path(b.fmt(
+        "third_party/riscv-tests/isa/{s}/{s}.S",
+        .{ suite.name, name },
+    )));
+    module.addAssemblyFile(b.path("test/riscv-tests/entry.S"));
+    module.addIncludePath(b.path("third_party/riscv-tests/env/p"));
+    module.addIncludePath(b.path("third_party/riscv-tests/isa/macros/scalar"));
+    if (suite.llvm_weak_global_compat) {
+        // GNU as permits changing a weak symbol to global; LLVM does not.
+        module.addCMacro("global", "weak");
+    }
+
+    const elf = b.addExecutable(.{
+        .name = test_name,
+        .root_module = module,
+    });
+    elf.setLinkerScript(b.path("test/riscv-tests/link.ld"));
+
+    const binary = elf.addObjCopy(.{
+        .basename = b.fmt("{s}.bin", .{test_name}),
+        .format = .bin,
+    });
+    const convert = b.addRunArtifact(bin2hex);
+    convert.addArg("4");
+    convert.addFileArg(binary.getOutput());
+    return convert.captureStdOut(.{ .basename = b.fmt("{s}.hex", .{test_name}) });
+}
+
+fn matchesAnyFilter(name: []const u8, filters: []const []const u8) bool {
+    if (filters.len == 0) return true;
+    for (filters) |filter| {
+        if (std.mem.indexOf(u8, name, filter) != null) return true;
+    }
+    return false;
 }
 
 fn addSimulator(b: *std.Build, veryl_build: *std.Build.Step.Run, test_mode: bool) std.Build.LazyPath {
