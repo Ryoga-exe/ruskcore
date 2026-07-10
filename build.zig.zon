@@ -1,0 +1,26 @@
+.{
+    .name = .ruskcore,
+    .version = "0.0.0",
+    .fingerprint = 0x1c9ad568bc10b1ff,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .riscv_tests = .{
+            .url = "https://github.com/riscv-software-src/riscv-tests/archive/34e6b6d1e7936b526075432fb730d89148623484.tar.gz",
+            .hash = "N-V-__8AABQQLABN-BQlwahtNuverDFlkiHODGHAiMDpFB4n",
+        },
+        .riscv_test_env = .{
+            .url = "https://github.com/riscv/riscv-test-env/archive/6de71edb142be36319e380ce782c3d1830c65d68.tar.gz",
+            .hash = "N-V-__8AACh1AwCRWACZ8TjTQ8QD-PCjZZBRjno5ld4ZZ8og",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "README.md",
+        "test",
+        "tools",
+        "Veryl.toml",
+        "Veryl.lock",
+    },
+}

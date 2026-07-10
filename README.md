@@ -6,12 +6,6 @@ A RISC-V CPU written in Veryl.
 
 Zig, Veryl, and Verilator are required.
 
-Initialize the RISC-V test sources after cloning the repository.
-
-```sh
-git submodule update --init --recursive
-```
-
 ```sh
 # Generate SystemVerilog with Veryl
 zig build

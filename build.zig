@@ -14,6 +14,9 @@ const test_suites = [_]TestSuite{
 };
 
 pub fn build(b: *std.Build) void {
+    const riscv_tests = b.dependency("riscv_tests", .{});
+    const riscv_test_env = b.dependency("riscv_test_env", .{});
+
     const veryl_fmt = b.addSystemCommand(&.{ "veryl", "fmt" });
     const fmt_step = b.step("fmt", "Format the Veryl sources");
     fmt_step.dependOn(&veryl_fmt.step);
@@ -67,9 +70,9 @@ pub fn build(b: *std.Build) void {
     const filters = b.args orelse &.{};
     var selected_tests: usize = 0;
     for (test_suites) |suite| {
-        const directory = b.fmt("third_party/riscv-tests/isa/{s}", .{suite.name});
+        const directory = b.fmt("isa/{s}", .{suite.name});
         const io = b.graph.io;
-        var dir = b.build_root.handle.openDir(io, directory, .{ .iterate = true }) catch
+        var dir = riscv_tests.builder.build_root.handle.openDir(io, directory, .{ .iterate = true }) catch
             @panic("unable to open RISC-V test suite");
         defer dir.close(io);
         var iterator = dir.iterate();
@@ -80,7 +83,14 @@ pub fn build(b: *std.Build) void {
             if (!matchesAnyFilter(test_name, filters)) continue;
             selected_tests += 1;
 
-            const image = addRiscvTest(b, bin2hex, suite, name);
+            const image = addRiscvTest(
+                b,
+                bin2hex,
+                riscv_tests,
+                riscv_test_env,
+                suite,
+                name,
+            );
             _ = test_images.addCopyFile(image, b.fmt("{s}.hex", .{test_name}));
         }
     }
@@ -97,6 +107,8 @@ pub fn build(b: *std.Build) void {
 fn addRiscvTest(
     b: *std.Build,
     bin2hex: *std.Build.Step.Compile,
+    riscv_tests: *std.Build.Dependency,
+    riscv_test_env: *std.Build.Dependency,
     suite: TestSuite,
     name: []const u8,
 ) std.Build.LazyPath {
@@ -112,13 +124,12 @@ fn addRiscvTest(
         .target = target,
         .optimize = .ReleaseSmall,
     });
-    module.addAssemblyFile(b.path(b.fmt(
-        "third_party/riscv-tests/isa/{s}/{s}.S",
+    module.addAssemblyFile(riscv_tests.path(b.fmt(
+        "isa/{s}/{s}.S",
         .{ suite.name, name },
     )));
-    module.addAssemblyFile(b.path("test/riscv-tests/entry.S"));
-    module.addIncludePath(b.path("third_party/riscv-tests/env/p"));
-    module.addIncludePath(b.path("third_party/riscv-tests/isa/macros/scalar"));
+    module.addIncludePath(riscv_test_env.path("p"));
+    module.addIncludePath(riscv_tests.path("isa/macros/scalar"));
     if (suite.llvm_weak_global_compat) {
         // GNU as permits changing a weak symbol to global; LLVM does not.
         module.addCMacro("global", "weak");
