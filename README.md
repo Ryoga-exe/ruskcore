@@ -10,6 +10,9 @@ Zig, Veryl, and Verilator are required.
 # Generate SystemVerilog with Veryl
 zig build
 
+# Check the Veryl sources for errors and warnings
+zig build check
+
 # Build the Verilator simulator
 zig build sim
 

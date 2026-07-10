@@ -17,16 +17,20 @@ pub fn build(b: *std.Build) void {
     const riscv_tests = b.dependency("riscv_tests", .{});
     const riscv_test_env = b.dependency("riscv_test_env", .{});
 
-    const veryl_fmt = b.addSystemCommand(&.{ "veryl", "fmt" });
+    const veryl_fmt = b.addSystemCommand(&.{ "veryl", "fmt", "--quiet" });
     const fmt_step = b.step("fmt", "Format the Veryl sources");
     fmt_step.dependOn(&veryl_fmt.step);
 
-    const veryl_build = b.addSystemCommand(&.{ "veryl", "build" });
+    const veryl_check = b.addSystemCommand(&.{ "veryl", "check", "--quiet" });
+    const check_step = b.step("check", "Check the Veryl sources");
+    check_step.dependOn(&veryl_check.step);
+
+    const veryl_build = b.addSystemCommand(&.{ "veryl", "build", "--quiet" });
     const veryl_step = b.step("veryl", "Build the Veryl project");
     veryl_step.dependOn(&veryl_build.step);
     b.getInstallStep().dependOn(&veryl_build.step);
 
-    const veryl_clean = b.addSystemCommand(&.{ "veryl", "clean" });
+    const veryl_clean = b.addSystemCommand(&.{ "veryl", "clean", "--quiet" });
     const clean_step = b.step("clean", "Remove generated Veryl files");
     clean_step.dependOn(&veryl_clean.step);
 
