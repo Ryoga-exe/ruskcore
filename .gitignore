@@ -1,18 +1,15 @@
 ### Veryl
 .build/
-dependencies/
-target/
-wave/
-doc/
+/target
+/dependencies
 *.f
+
+### Zig
+.zig-cache/
+zig-out/
 
 ### Verilator
 obj_dir/
 
 ### Test
 results
-
-### Vivado
-.Xil
-project
-*.xpr
