@@ -27,8 +27,8 @@ module memunit (
     var req_wmask: logic<MEM_DATA_WIDTH / 8>;
 
     const W   : u32                   = XLEN;
-    let D   : logic<MEM_DATA_WIDTH> = membus.rdata;
-    let sext: logic                 = (ctrl.funct3[2] == 1'b0); // Whether to perform sign extension
+    let   D   : logic<MEM_DATA_WIDTH> = membus.rdata;
+    let   sext: logic                 = (ctrl.funct3[2] == 1'b0); // Whether to perform sign extension
 
     always_comb {
         // memory access
@@ -55,12 +55,13 @@ module memunit (
             2'b10  : D,
             default: 'x,
         };
-        stall = valid & case state {
-            State::Init     : is_new && inst_is_memop(ctrl),
-            State::WaitReady: 1,
-            State::WaitValid: !membus.rvalid,
-            default         : 0,
-        };
+        stall = valid
+            & case state {
+                State::Init     : is_new && inst_is_memop(ctrl),
+                State::WaitReady: 1,
+                State::WaitValid: !membus.rvalid,
+                default         : 0,
+            };
     }
 
     always_ff {

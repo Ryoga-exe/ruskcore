@@ -65,12 +65,7 @@ module top #(
         membus  ,
     );
 
-    inst c: core (
-        clk       ,
-        rst       ,
-        i_membus  ,
-        d_membus  ,
-    );
+    inst c: core ( clk, rst, i_membus, d_membus );
 
     // riscv-test
     const RISCVTESTS_TOHOST_ADDR: Addr = 'h1000 as Addr;
