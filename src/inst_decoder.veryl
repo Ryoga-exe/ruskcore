@@ -28,13 +28,13 @@ module inst_decoder (
 
     always_comb {
         imm = case op {
-            OP_LUI, OP_AUIPC: imm_u,
-            OP_JAL          : imm_j,
-            OP_JALR, OP_LOAD: imm_i,
-            OP_OP_IMM       : imm_i,
-            OP_BRANCH       : imm_b,
-            OP_STORE        : imm_s,
-            default         : 'x,
+            OP_LUI, OP_AUIPC       : imm_u,
+            OP_JAL                 : imm_j,
+            OP_JALR, OP_LOAD       : imm_i,
+            OP_OP_IMM, OP_OP_IMM_32: imm_i,
+            OP_BRANCH              : imm_b,
+            OP_STORE               : imm_s,
+            default                : 'x,
         };
         ctrl = {
             case op {
