@@ -182,7 +182,7 @@ fn addRiscvTest(
         .format = .bin,
     });
     const convert = b.addRunArtifact(bin2hex);
-    convert.addArg("4");
+    convert.addArg("8");
     convert.addFileArg(binary.getOutput());
     return convert.captureStdOut(.{ .basename = b.fmt("{s}.hex", .{test_name}) });
 }
