@@ -34,6 +34,34 @@ pub fn build(b: *std.Build) void {
     const clean_step = b.step("clean", "Remove generated Veryl files");
     clean_step.dependOn(&veryl_clean.step);
 
+    const synth_top = b.option(
+        []const u8,
+        "synth-top",
+        "Top-level Veryl module to synthesize",
+    ) orelse "core";
+    const timing_paths = b.option(
+        u32,
+        "timing-paths",
+        "Number of timing paths to report during synthesis",
+    ) orelse 10;
+
+    const veryl_command = addHostTool(b, "veryl-command", "tools/veryl_command.zig");
+    const synth = addVerylSynth(b, veryl_command, synth_top, timing_paths);
+    synth.addArgs(&.{ "--dump-timing", "--dump-area" });
+    _ = synth.captureStdErr(.{ .basename = "veryl-synth.stderr" });
+    synth.has_side_effects = true;
+    const synth_step = b.step("synth", "Run synthesis and dump timing/area reports");
+    synth_step.dependOn(&synth.step);
+
+    const fmax_synth = addVerylSynth(b, veryl_command, synth_top, 1);
+    const synthesis_report = fmax_synth.captureStdOut(.{ .basename = "veryl-synth.txt" });
+    _ = fmax_synth.captureStdErr(.{ .basename = "veryl-synth.stderr" });
+    const fmax_tool = addHostTool(b, "fmax", "tools/fmax.zig");
+    const run_fmax = b.addRunArtifact(fmax_tool);
+    run_fmax.addFileArg(synthesis_report);
+    const fmax_step = b.step("fmax", "Estimate fmax from the critical path");
+    fmax_step.dependOn(&run_fmax.step);
+
     const simulator = addSimulator(b, veryl_build, false);
     const sim_step = b.step("sim", "Build the Verilator simulator");
     simulator.addStepDependencies(sim_step);
@@ -207,6 +235,22 @@ fn addHostTool(b: *std.Build, name: []const u8, source: []const u8) *std.Build.S
             .optimize = .ReleaseSafe,
         }),
     });
+}
+
+fn addVerylSynth(
+    b: *std.Build,
+    veryl_command: *std.Build.Step.Compile,
+    top: []const u8,
+    timing_paths: u32,
+) *std.Build.Step.Run {
+    const synth = b.addRunArtifact(veryl_command);
+    synth.addArgs(&.{ "synth", "--top" });
+    synth.addArg(top);
+    synth.addArgs(&.{ "--timing-paths", b.fmt("{d}", .{timing_paths}) });
+    synth.addFileInput(b.path("Veryl.toml"));
+    synth.addFileInput(b.path("Veryl.lock"));
+    addDirectoryInputs(b, synth, "src", ".veryl");
+    return synth;
 }
 
 fn addDirectoryInputs(

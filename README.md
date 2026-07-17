@@ -20,6 +20,15 @@ zig build sim
 zig build run -- path/to/memory.hex 1000
 ```
 
+## Synthesis
+
+```sh
+zig build synth
+zig build fmax
+```
+
+The synthesis top defaults to `core`. It and the number of reported timing paths can be overridden with `-Dsynth-top=<module>` and `-Dtiming-paths=<count>`.
+
 ## Test
 
 ```sh
