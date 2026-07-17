@@ -8,19 +8,6 @@ module core (
     i_membus: modport membus_if::<ILEN, XLEN>::master          ,
     d_membus: modport membus_if::<MEM_DATA_WIDTH, XLEN>::master,
 ) {
-    var if_pc          : Addr ; // program counter
-    var if_is_requested: logic; // fetch 中か
-    var if_pc_requested: Addr ; // 要求アドレス
-
-    let if_pc_next: Addr = if_pc + 4;
-
-    var control_hazard        : logic;
-    var control_hazard_pc_next: Addr ;
-
-    // ====================================================
-    // * FIFO
-    // ====================================================
-
     // IF -> ID
     var if_fifo_wready    : logic       ;
     var if_fifo_wready_two: logic       ;
@@ -54,6 +41,245 @@ module core (
     var wbq_rvalid: logic   ;
     var wbq_rdata : wbq_type;
 
+    var memu_rdata: UIntX;
+    var memu_stall: logic;
+
+    var csru_rdata      : UIntX;
+    var csru_raise_trap : logic;
+    var csru_trap_vector: Addr ;
+
+    // ====================================================
+    // * IF stage
+    // ====================================================
+    var if_pc          : Addr ; // program counter
+    var if_is_requested: logic; // fetch 中か
+    var if_pc_requested: Addr ; // 要求アドレス
+    let if_pc_next     : Addr  = if_pc + 4;
+
+    var control_hazard        : logic;
+    var control_hazard_pc_next: Addr ;
+
+    // fetch
+    always_comb {
+        // FIFO に 2 個以上空きがあるとき fetch
+        i_membus.valid = if_fifo_wready_two;
+        i_membus.addr  = if_pc;
+        i_membus.wen   = 0;
+        i_membus.wdata = 'x; // no use
+        i_membus.wmask = 0;
+    }
+
+    always_ff {
+        if_reset {
+            if_pc           = 0;
+            if_is_requested = 0;
+            if_pc_requested = 0;
+        } else {
+            if control_hazard {
+                if_pc           = control_hazard_pc_next;
+                if_is_requested = 0;
+            } else {
+                if if_is_requested {
+                    if i_membus.rvalid {
+                        if_is_requested = i_membus.ready && i_membus.valid;
+                        if i_membus.ready && i_membus.valid {
+                            if_pc           = if_pc_next;
+                            if_pc_requested = if_pc;
+                        }
+                    }
+                } else {
+                    if i_membus.ready && i_membus.valid {
+                        if_is_requested = 1;
+                        if_pc           = if_pc_next;
+                        if_pc_requested = if_pc;
+                    }
+                }
+            }
+        }
+    }
+
+    // FIFO
+    always_ff {
+        if_reset {
+            if_fifo_wvalid = 0;
+            if_fifo_wdata  = 0;
+        } else {
+            if control_hazard {
+                if_fifo_wvalid = 0;
+            } else {
+                if if_is_requested && i_membus.rvalid {
+                    if_fifo_wvalid     = 1;
+                    if_fifo_wdata.addr = if_pc_requested;
+                    if_fifo_wdata.bits = i_membus.rdata;
+                } else {
+                    if if_fifo_wvalid && if_fifo_wready {
+                        // FIFO にデータを格納できる
+                        if_fifo_wvalid = 0;
+                    }
+                }
+            }
+        }
+    }
+
+    assign control_hazard         = ids_valid
+        && (csru_raise_trap || ids_ctrl.is_jump || inst_is_br(ids_ctrl) && brunit_take);
+    assign control_hazard_pc_next = switch {
+        csru_raise_trap     : csru_trap_vector, // jump trap_vector when traps
+        inst_is_br(ids_ctrl): ids_pc + ids_imm,
+        default             : alu_result & ~1
+    };
+
+    // ====================================================
+    // * ID stage
+    // ====================================================
+    let ids_valid    : logic    = if_fifo_rvalid;
+    let ids_pc       : Addr     = if_fifo_rdata.addr;
+    let ids_inst_bits: Inst     = if_fifo_rdata.bits;
+    var ids_ctrl     : InstCtrl;
+    var ids_imm      : UIntX   ;
+
+    inst decoder: inst_decoder ( bits: ids_inst_bits, ctrl: ids_ctrl, imm: ids_imm );
+
+    always_comb {
+        // ID -> EX
+        if_fifo_rready = exq_wready;
+        exq_wvalid     = if_fifo_rvalid;
+        exq_wdata.addr = if_fifo_rdata.addr;
+        exq_wdata.bits = if_fifo_rdata.bits;
+        exq_wdata.ctrl = ids_ctrl;
+        exq_wdata.imm  = ids_imm;
+    }
+
+    // ====================================================
+    // * EX stage
+    // ====================================================
+    let exs_valid    : logic    = exq_rvalid;
+    let exs_pc       : Addr     = exq_rdata.addr;
+    let exs_inst_bits: Inst     = exq_rdata.bits;
+    let exs_ctrl     : InstCtrl = exq_rdata.ctrl;
+    let exs_imm      : UIntX    = exq_rdata.imm;
+
+    // Registers
+    var regfile: UIntX<32>;
+
+    // register number
+    let exs_rs1_addr: logic<5> = exs_inst_bits[19:15];
+    let exs_rs2_addr: logic<5> = exs_inst_bits[24:20];
+
+    // source register data
+    let exs_rs1_data: UIntX = if exs_rs1_addr == 0 ? 0 : regfile[exs_rs1_addr];
+    let exs_rs2_data: UIntX = if exs_rs2_addr == 0 ? 0 : regfile[exs_rs2_addr];
+
+    // Data Hazerd
+
+    // ALU
+    var exs_op1       : UIntX;
+    var exs_op2       : UIntX;
+    var exs_alu_result: UIntX;
+
+    always_comb {
+        case ids_ctrl.itype {
+            InstType::R, InstType::B: {
+                exs_op1 = exs_rs1_data;
+                exs_op2 = exs_rs2_data;
+            }
+            InstType::I, InstType::S: {
+                exs_op1 = exs_rs1_data;
+                exs_op2 = ids_imm;
+            }
+            InstType::U, InstType::J: {
+                exs_op1 = ids_pc;
+                exs_op2 = ids_imm;
+            }
+            default: {
+                exs_op1 = 'x;
+                exs_op2 = 'x;
+            }
+        }
+    }
+
+    inst alum: alu ( ctrl: ids_ctrl, op1: exs_op1, op2: exs_op2, result: exs_alu_result );
+
+    // Bru
+    var exs_brunit_take: logic;
+
+    inst bru: brunit ( funct3: exs_ctrl.funct3, op1: exs_op1, op2: exs_op2, take: exs_brunit_take );
+
+    always_comb {
+        // EX -> MEM
+        exq_rready            = memq_wready;
+        memq_wvalid           = exq_rvalid;
+        memq_wdata.addr       = exq_rdata.addr;
+        memq_wdata.bits       = exq_rdata.bits;
+        memq_wdata.ctrl       = exq_rdata.ctrl;
+        memq_wdata.imm        = exq_rdata.imm;
+        memq_wdata.rs1_addr   = exs_rs1_addr;
+        memq_wdata.rs1_data   = exs_rs1_data;
+        memq_wdata.rs2_data   = exs_rs2_data;
+        memq_wdata.alu_result = exs_alu_result;
+        memq_wdata.br_taken   = exs_ctrl.is_jump || inst_is_br(exs_ctrl) && exs_brunit_take;
+        memq_wdata.jump_addr  = if inst_is_br(exs_ctrl) ? exs_pc + exs_imm : exs_alu_result & ~1;
+    }
+
+    let rd_addr: logic<5> = ids_inst_bits[11:7];
+    let wb_data: UIntX    = switch {
+        ids_ctrl.is_lui : ids_imm,
+        ids_ctrl.is_jump: ids_pc + 4,
+        ids_ctrl.is_load: memu_rdata,
+        ids_ctrl.is_csr : csru_rdata,
+        default         : alu_result,
+    };
+
+    always_ff {
+        // write back
+        if ids_valid && if_fifo_rready && ids_ctrl.rwb_en {
+            regfile[rd_addr] = wb_data;
+        }
+    }
+
+    // ====================================================
+    // * Memory
+    // ====================================================
+    inst memu: memunit (
+        clk               ,
+        rst               ,
+        valid : ids_valid ,
+        is_new: ids_is_new,
+        ctrl  : ids_ctrl  ,
+        addr  : alu_result,
+        rs2   : rs2_data  ,
+        rdata : memu_rdata,
+        stall : memu_stall,
+        membus: d_membus  ,
+    );
+
+    // ====================================================
+    // * CSR
+    // ====================================================
+    inst csru: csrunit (
+        clk                           ,
+        rst                           ,
+        valid   : ids_valid           ,
+        pc      : ids_pc              ,
+        ctrl    : ids_ctrl            ,
+        rd_addr                       ,
+        rs1_addr                      ,
+        csr_addr: ids_inst_bits[31:20],
+        rs1     : if ids_ctrl.funct3[2] == 1 && ids_ctrl.funct3[1:0] != 0 ?
+            {
+                1'b0 repeat XLEN - $bits(rs1_addr), rs1_addr
+            } // expand rs1 with 0
+        :
+            rs1_data
+        ,
+        rdata      : csru_rdata      ,
+        raise_trap : csru_raise_trap ,
+        trap_vector: csru_trap_vector,
+    );
+
+    // ====================================================
+    // * FIFO
+    // ====================================================
     inst if_fifo: fifo #(
         DATA_TYPE: if_fifo_type,
         WIDTH    : 3           ,
@@ -113,214 +339,6 @@ module core (
         rready: wbq_rready,
         rvalid: wbq_rvalid,
         rdata : wbq_rdata ,
-    );
-
-    var memu_rdata: UIntX;
-    var memu_stall: logic;
-
-    let ids_valid    : logic    = if_fifo_rvalid;
-    let ids_pc       : Addr     = if_fifo_rdata.addr;
-    let ids_inst_bits: Inst     = if_fifo_rdata.bits;
-    var ids_ctrl     : InstCtrl;
-    var ids_imm      : UIntX   ;
-
-    var csru_rdata      : UIntX;
-    var csru_raise_trap : logic;
-    var csru_trap_vector: Addr ;
-
-    var op1       : UIntX;
-    var op2       : UIntX;
-    var alu_result: UIntX;
-
-    var brunit_take: logic;
-
-    // ====================================================
-    // * IF stage
-    // ====================================================
-
-    // FIFO
-    always_ff {
-        if_reset {
-            if_fifo_wvalid = 0;
-            if_fifo_wdata  = 0;
-        } else {
-            if control_hazard {
-                if_fifo_wvalid = 0;
-            } else {
-                if if_is_requested && i_membus.rvalid {
-                    if_fifo_wvalid     = 1;
-                    if_fifo_wdata.addr = if_pc_requested;
-                    if_fifo_wdata.bits = i_membus.rdata;
-                } else {
-                    if if_fifo_wvalid && if_fifo_wready {
-                        // FIFO にデータを格納できる
-                        if_fifo_wvalid = 0;
-                    }
-                }
-            }
-        }
-    }
-
-    // fetch
-    always_comb {
-        // FIFO に 2 個以上空きがあるとき fetch
-        i_membus.valid = if_fifo_wready_two;
-        i_membus.addr  = if_pc;
-        i_membus.wen   = 0;
-        i_membus.wdata = 'x; // no use
-        i_membus.wmask = 0;
-    }
-
-    always_ff {
-        if_reset {
-            if_pc           = 0;
-            if_is_requested = 0;
-            if_pc_requested = 0;
-        } else {
-            if control_hazard {
-                if_pc           = control_hazard_pc_next;
-                if_is_requested = 0;
-            } else {
-                if if_is_requested {
-                    if i_membus.rvalid {
-                        if_is_requested = i_membus.ready && i_membus.valid;
-                        if i_membus.ready && i_membus.valid {
-                            if_pc           = if_pc_next;
-                            if_pc_requested = if_pc;
-                        }
-                    }
-                } else {
-                    if i_membus.ready && i_membus.valid {
-                        if_is_requested = 1;
-                        if_pc           = if_pc_next;
-                        if_pc_requested = if_pc;
-                    }
-                }
-            }
-        }
-    }
-
-    assign control_hazard         = ids_valid
-        && (csru_raise_trap || ids_ctrl.is_jump || inst_is_br(ids_ctrl) && brunit_take);
-    assign control_hazard_pc_next = switch {
-        csru_raise_trap     : csru_trap_vector, // jump trap_vector when traps
-        inst_is_br(ids_ctrl): ids_pc + ids_imm,
-        default             : alu_result & ~1
-    };
-
-    // ====================================================
-    // * ID stage
-    // ====================================================
-    inst decoder: inst_decoder ( bits: ids_inst_bits, ctrl: ids_ctrl, imm: ids_imm );
-
-    always_comb {
-        // ID -> EX
-        if_fifo_rready = exq_wready;
-        exq_wvalid     = if_fifo_rvalid;
-        exq_wdata.addr = if_fifo_rdata.addr;
-        exq_wdata.bits = if_fifo_rdata.bits;
-        exq_wdata.ctrl = ids_ctrl;
-        exq_wdata.imm  = ids_imm;
-    }
-
-    // ====================================================
-    // * Registers
-    // ====================================================
-    var regfile: UIntX<32>;
-
-    // register number
-    let rs1_addr: logic<5> = ids_inst_bits[19:15];
-    let rs2_addr: logic<5> = ids_inst_bits[24:20];
-
-    // source register data
-    let rs1_data: UIntX = if rs1_addr == 0 ? 0 : regfile[rs1_addr];
-    let rs2_data: UIntX = if rs2_addr == 0 ? 0 : regfile[rs2_addr];
-
-    let rd_addr: logic<5> = ids_inst_bits[11:7];
-    let wb_data: UIntX    = switch {
-        ids_ctrl.is_lui : ids_imm,
-        ids_ctrl.is_jump: ids_pc + 4,
-        ids_ctrl.is_load: memu_rdata,
-        ids_ctrl.is_csr : csru_rdata,
-        default         : alu_result,
-    };
-
-    always_ff {
-        // write back
-        if ids_valid && if_fifo_rready && ids_ctrl.rwb_en {
-            regfile[rd_addr] = wb_data;
-        }
-    }
-
-    // ====================================================
-    // * ALU
-    // ====================================================
-    always_comb {
-        case ids_ctrl.itype {
-            InstType::R, InstType::B: {
-                op1 = rs1_data;
-                op2 = rs2_data;
-            }
-            InstType::I, InstType::S: {
-                op1 = rs1_data;
-                op2 = ids_imm;
-            }
-            InstType::U, InstType::J: {
-                op1 = ids_pc;
-                op2 = ids_imm;
-            }
-            default: {
-                op1 = 'x;
-                op2 = 'x;
-            }
-        }
-    }
-
-    inst alum: alu ( ctrl: ids_ctrl, op1, op2, result: alu_result );
-
-    // ====================================================
-    // * Memory
-    // ====================================================
-    inst memu: memunit (
-        clk               ,
-        rst               ,
-        valid : ids_valid ,
-        is_new: ids_is_new,
-        ctrl  : ids_ctrl  ,
-        addr  : alu_result,
-        rs2   : rs2_data  ,
-        rdata : memu_rdata,
-        stall : memu_stall,
-        membus: d_membus  ,
-    );
-
-    // ====================================================
-    // * Brunit
-    // ====================================================
-    inst bru: brunit ( funct3: ids_ctrl.funct3, op1, op2, take: brunit_take );
-
-    // ====================================================
-    // * CSR
-    // ====================================================
-    inst csru: csrunit (
-        clk                           ,
-        rst                           ,
-        valid   : ids_valid           ,
-        pc      : ids_pc              ,
-        ctrl    : ids_ctrl            ,
-        rd_addr                       ,
-        rs1_addr                      ,
-        csr_addr: ids_inst_bits[31:20],
-        rs1     : if ids_ctrl.funct3[2] == 1 && ids_ctrl.funct3[1:0] != 0 ?
-            {
-                1'b0 repeat XLEN - $bits(rs1_addr), rs1_addr
-            } // expand rs1 with 0
-        :
-            rs1_data
-        ,
-        rdata      : csru_rdata      ,
-        raise_trap : csru_raise_trap ,
-        trap_vector: csru_trap_vector,
     );
 
     // ====================================================
