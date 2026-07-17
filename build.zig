@@ -2,15 +2,7 @@ const std = @import("std");
 
 const TestSuite = struct {
     name: []const u8,
-    llvm_weak_global_compat: bool = false,
-};
-
-const test_suites = [_]TestSuite{
-    .{ .name = "rv32ui" },
-    .{
-        .name = "rv32mi",
-        .llvm_weak_global_compat = true,
-    },
+    arch: std.Target.Cpu.Arch,
 };
 
 pub fn build(b: *std.Build) void {
@@ -101,9 +93,17 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run the RISC-V tests with Verilator");
     const filters = b.args orelse &.{};
     var selected_tests: usize = 0;
-    for (test_suites) |suite| {
+    const io = b.graph.io;
+    var isa_dir = riscv_tests.builder.build_root.handle.openDir(io, "isa", .{ .iterate = true }) catch
+        @panic("unable to open RISC-V test suites");
+    defer isa_dir.close(io);
+    var suite_iterator = isa_dir.iterate();
+    while (suite_iterator.next(io) catch @panic("unable to enumerate RISC-V test suites")) |suite_entry| {
+        if (suite_entry.kind != .directory) continue;
+        const suite = parseTestSuite(suite_entry.name) orelse continue;
+        if (filters.len == 0 and !isDefaultTestSuite(suite.name)) continue;
+
         const directory = b.fmt("isa/{s}", .{suite.name});
-        const io = b.graph.io;
         var dir = riscv_tests.builder.build_root.handle.openDir(io, directory, .{ .iterate = true }) catch
             @panic("unable to open RISC-V test suite");
         defer dir.close(io);
@@ -145,8 +145,12 @@ fn addRiscvTest(
     name: []const u8,
 ) std.Build.LazyPath {
     const target = b.resolveTargetQuery(.{
-        .cpu_arch = .riscv32,
-        .cpu_model = .{ .explicit = &std.Target.riscv.cpu.generic_rv32 },
+        .cpu_arch = suite.arch,
+        .cpu_model = .{ .explicit = switch (suite.arch) {
+            .riscv32 => &std.Target.riscv.cpu.generic_rv32,
+            .riscv64 => &std.Target.riscv.cpu.generic_rv64,
+            else => unreachable,
+        } },
         .os_tag = .freestanding,
         .abi = .none,
     });
@@ -162,7 +166,7 @@ fn addRiscvTest(
     )));
     module.addIncludePath(riscv_test_env.path("p"));
     module.addIncludePath(riscv_tests.path("isa/macros/scalar"));
-    if (suite.llvm_weak_global_compat) {
+    if (std.mem.endsWith(u8, suite.name, "mi")) {
         // GNU as permits changing a weak symbol to global; LLVM does not.
         module.addCMacro("global", "weak");
     }
@@ -181,6 +185,20 @@ fn addRiscvTest(
     convert.addArg("4");
     convert.addFileArg(binary.getOutput());
     return convert.captureStdOut(.{ .basename = b.fmt("{s}.hex", .{test_name}) });
+}
+
+fn parseTestSuite(name: []const u8) ?TestSuite {
+    const arch: std.Target.Cpu.Arch = if (std.mem.startsWith(u8, name, "rv32"))
+        .riscv32
+    else if (std.mem.startsWith(u8, name, "rv64"))
+        .riscv64
+    else
+        return null;
+    return .{ .name = name, .arch = arch };
+}
+
+fn isDefaultTestSuite(name: []const u8) bool {
+    return std.mem.endsWith(u8, name, "ui") or std.mem.endsWith(u8, name, "mi");
 }
 
 fn matchesAnyFilter(name: []const u8, filters: []const []const u8) bool {
