@@ -298,7 +298,7 @@ module core (
     let wbs_ctrl     : InstCtrl = wbq_rdata.ctrl;
     let wbs_imm      : UIntX    = wbq_rdata.imm;
 
-    let wbs_rd_addr: logic<5> = ids_inst_bits[11:7];
+    let wbs_rd_addr: logic<5> = wbs_inst_bits[11:7];
     let wbs_wb_data: UIntX    = switch {
         wbs_ctrl.is_lui : wbs_imm,
         wbs_ctrl.is_jump: wbs_pc + 4,
