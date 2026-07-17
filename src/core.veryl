@@ -183,7 +183,7 @@ module core (
         }
     }
 
-    inst alum: alu ( ctrl: ids_ctrl, op1: exs_op1, op2: exs_op2, result: exs_alu_result );
+    inst alum: alu ( ctrl: exs_ctrl, op1: exs_op1, op2: exs_op2, result: exs_alu_result );
 
     // Bru
     var exs_brunit_take: logic;
