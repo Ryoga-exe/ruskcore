@@ -5,6 +5,19 @@ const TestSuite = struct {
     arch: std.Target.Cpu.Arch,
 };
 
+const FpgaBoard = enum {
+    tangnano9k,
+    tangnano20k,
+};
+
+const FpgaConfig = struct {
+    device: []const u8,
+    family: []const u8,
+    yosys_family: []const u8,
+    constraints: []const u8,
+    timing: []const u8,
+};
+
 pub fn build(b: *std.Build) void {
     const riscv_tests = b.dependency("riscv_tests", .{});
     const riscv_test_env = b.dependency("riscv_test_env", .{});
@@ -25,6 +38,42 @@ pub fn build(b: *std.Build) void {
     const veryl_clean = b.addSystemCommand(&.{ "veryl", "clean", "--quiet" });
     const clean_step = b.step("clean", "Remove generated Veryl files");
     clean_step.dependOn(&veryl_clean.step);
+
+    const fpga_board = b.option(
+        FpgaBoard,
+        "board",
+        "FPGA board (tangnano9k or tangnano20k)",
+    ) orelse .tangnano20k;
+    const fpga = fpgaConfig(fpga_board);
+    const bitstream = addBitstream(b, veryl_build, fpga_board, fpga);
+    const install_bitstream = b.addInstallFile(
+        bitstream,
+        b.fmt("fpga/{s}/ruskcore.fs", .{@tagName(fpga_board)}),
+    );
+    const bitstream_step = b.step("bitstream", "Build a Tang Nano bitstream");
+    bitstream_step.dependOn(&install_bitstream.step);
+
+    const program = b.addSystemCommand(&.{
+        "openFPGALoader",
+        "-m",
+        "-b",
+        @tagName(fpga_board),
+    });
+    program.addFileArg(bitstream);
+    program.has_side_effects = true;
+    const program_step = b.step("program", "Program a Tang Nano SRAM");
+    program_step.dependOn(&program.step);
+
+    const flash = b.addSystemCommand(&.{
+        "openFPGALoader",
+        "-b",
+        @tagName(fpga_board),
+        "-f",
+    });
+    flash.addFileArg(bitstream);
+    flash.has_side_effects = true;
+    const flash_step = b.step("flash", "Program a Tang Nano non-volatile flash");
+    flash_step.dependOn(&flash.step);
 
     const synth_top = b.option(
         []const u8,
@@ -134,6 +183,67 @@ pub fn build(b: *std.Build) void {
         build_tests_step.dependOn(&test_images.step);
         test_step.dependOn(&run_tests.step);
     }
+}
+
+fn fpgaConfig(board: FpgaBoard) FpgaConfig {
+    return switch (board) {
+        .tangnano9k => .{
+            .device = "GW1NR-LV9QN88PC6/I5",
+            .family = "GW1N-9C",
+            .yosys_family = "gw1n",
+            .constraints = "fpga/tangnano9k/tangnano9k.cst",
+            .timing = "fpga/tangnano9k/timing.sdc",
+        },
+        .tangnano20k => .{
+            .device = "GW2AR-LV18QN88C8/I7",
+            .family = "GW2A-18C",
+            .yosys_family = "gw2a",
+            .constraints = "fpga/tangnano20k/tangnano20k.cst",
+            .timing = "fpga/tangnano20k/timing.sdc",
+        },
+    };
+}
+
+fn addBitstream(
+    b: *std.Build,
+    veryl_build: *std.Build.Step.Run,
+    board: FpgaBoard,
+    config: FpgaConfig,
+) std.Build.LazyPath {
+    const yosys_script = b.fmt(
+        "read_slang --top ruskcore_top_tang -DSYNTHESIS=1 " ++
+            "-F ruskcore.f; " ++
+            "setattr -unset init w:*; " ++
+            "synth_gowin -setundef -family {s} -top ruskcore_top_tang",
+        .{config.yosys_family},
+    );
+    const yosys = b.addSystemCommand(&.{ "yosys", "-q", "-m", "slang", "-p" });
+    yosys.addArg(yosys_script);
+    yosys.addArg("-o");
+    const synthesized = yosys.addOutputFileArg(b.fmt("{s}.json", .{@tagName(board)}));
+    yosys.step.dependOn(&veryl_build.step);
+    yosys.addFileInput(b.path("Veryl.toml"));
+    yosys.addFileInput(b.path("Veryl.lock"));
+    yosys.addFileInput(b.path("ruskcore.f"));
+    yosys.addFileInput(b.path("test/led_counter.hex"));
+    addDirectoryInputs(b, yosys, "src", ".veryl");
+
+    const nextpnr = b.addSystemCommand(&.{ "nextpnr-himbaechel", "--json" });
+    nextpnr.addFileArg(synthesized);
+    nextpnr.addArg("--write");
+    const routed = nextpnr.addOutputFileArg(b.fmt("{s}-pnr.json", .{@tagName(board)}));
+    nextpnr.addArgs(&.{ "--device", config.device, "--vopt" });
+    nextpnr.addArg(b.fmt("family={s}", .{config.family}));
+    nextpnr.addArg("--vopt");
+    nextpnr.addPrefixedFileArg("cst=", b.path(config.constraints));
+    nextpnr.addArgs(&.{ "--freq", "27" });
+    nextpnr.addArg("--sdc");
+    nextpnr.addFileArg(b.path(config.timing));
+
+    const pack = b.addSystemCommand(&.{ "gowin_pack", "-c", "-d", config.family, "-o" });
+    const output = pack.addOutputFileArg(b.fmt("ruskcore-{s}.fs", .{@tagName(board)}));
+    pack.addFileArg(routed);
+    return output;
 }
 
 fn addRiscvTest(
