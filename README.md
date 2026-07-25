@@ -20,6 +20,19 @@ zig build sim
 zig build run -- path/to/memory.hex 1000
 ```
 
+## Program
+
+```sh
+# Generate bitstream (for tangnano9k)
+zig build bitstream -Dboard=tangnano9k
+
+# Write bitstream to SRAM
+zig build program -Dboard=tangnano9k
+
+# Write bitstream to Flash
+zig build flash -Dboard=tangnano9k
+```
+
 ## Synthesis
 
 ```sh
