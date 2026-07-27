@@ -1,10 +1,14 @@
 import eei::*;
 
-module top_tang (
+module top_tang #(
+    param RESET_ACTIVE_HIGH: bit = 0,
+) (
     clk: input  clock   ,
-    rst: input  reset   ,
+    rst: input  logic   ,
     led: output logic<6>,
 ) {
+    let core_rst: reset = if RESET_ACTIVE_HIGH ? !rst : rst;
+
     // CSRの下位ビットをLEDに接続する
     var led_top: UIntX;
     always_comb {
@@ -16,9 +20,9 @@ module top_tang (
         MEMORY_FILEPATH       : "test/led_counter.hex",
     ) (
         #[ifdef(TEST_MODE)]
-        test_success: _      ,
-        clk                  ,
-        rst                  ,
-        led         : led_top,
+        test_success: _       ,
+        clk                   ,
+        rst         : core_rst,
+        led         : led_top ,
     );
 }

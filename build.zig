@@ -16,6 +16,7 @@ const FpgaConfig = struct {
     yosys_family: []const u8,
     constraints: []const u8,
     timing: []const u8,
+    reset_active_high: bool,
 };
 
 pub fn build(b: *std.Build) void {
@@ -193,6 +194,7 @@ fn fpgaConfig(board: FpgaBoard) FpgaConfig {
             .yosys_family = "gw1n",
             .constraints = "fpga/tangnano9k/tangnano9k.cst",
             .timing = "fpga/tangnano9k/timing.sdc",
+            .reset_active_high = false,
         },
         .tangnano20k => .{
             .device = "GW2AR-LV18QN88C8/I7",
@@ -200,6 +202,7 @@ fn fpgaConfig(board: FpgaBoard) FpgaConfig {
             .yosys_family = "gw2a",
             .constraints = "fpga/tangnano20k/tangnano20k.cst",
             .timing = "fpga/tangnano20k/timing.sdc",
+            .reset_active_high = true,
         },
     };
 }
@@ -211,11 +214,11 @@ fn addBitstream(
     config: FpgaConfig,
 ) std.Build.LazyPath {
     const yosys_script = b.fmt(
-        "read_slang --top ruskcore_top_tang " ++
+        "read_slang --top ruskcore_top_tang -G RESET_ACTIVE_HIGH={d} " ++
             "-F ruskcore.f; " ++
             "setattr -unset init w:*; " ++
             "synth_gowin -setundef -family {s} -top ruskcore_top_tang",
-        .{config.yosys_family},
+        .{ @intFromBool(config.reset_active_high), config.yosys_family },
     );
     const yosys = b.addSystemCommand(&.{ "yosys", "-q", "-m", "slang", "-p" });
     yosys.addArg(yosys_script);
