@@ -211,7 +211,7 @@ fn addBitstream(
     config: FpgaConfig,
 ) std.Build.LazyPath {
     const yosys_script = b.fmt(
-        "read_slang --top ruskcore_top_tang -DSYNTHESIS=1 " ++
+        "read_slang --top ruskcore_top_tang " ++
             "-F ruskcore.f; " ++
             "setattr -unset init w:*; " ++
             "synth_gowin -setundef -family {s} -top ruskcore_top_tang",
@@ -331,6 +331,7 @@ fn addSimulator(b: *std.Build, veryl_build: *std.Build.Step.Run, test_mode: bool
         "-j",
         "0",
     });
+    verilator.addArg("-DSIMULATION");
     if (test_mode) verilator.addArg("-DTEST_MODE");
     verilator.addArgs(&.{
         "--top-module",
