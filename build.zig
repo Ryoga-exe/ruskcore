@@ -257,6 +257,7 @@ fn addRiscvTest(
     suite: TestSuite,
     name: []const u8,
 ) std.Build.LazyPath {
+    const riscv = std.Target.riscv;
     const target = b.resolveTargetQuery(.{
         .cpu_arch = suite.arch,
         .cpu_model = .{ .explicit = switch (suite.arch) {
@@ -264,6 +265,9 @@ fn addRiscvTest(
             .riscv64 => &std.Target.riscv.cpu.generic_rv64,
             else => unreachable,
         } },
+        .cpu_features_add = riscv.featureSet(&[_]riscv.Feature{
+            .m,
+        }),
         .os_tag = .freestanding,
         .abi = .none,
     });
