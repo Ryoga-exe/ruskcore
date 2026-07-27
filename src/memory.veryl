@@ -14,11 +14,7 @@ module memory::<DATA_WIDTH: u32, ADDR_WIDTH: u32> #(
     initial {
         // initialize mem
         if FILEPATH != "" {
-            if FILEPATH_IS_ENV {
-                $readmemh(util::get_env(FILEPATH), mem);
-            } else {
-                $readmemh(FILEPATH, mem);
-            }
+            $readmemh(util::resolve_filepath(FILEPATH, FILEPATH_IS_ENV), mem);
         }
     }
 

@@ -14,7 +14,7 @@ package eei {
 
     // memory
     const MEM_DATA_WIDTH: u32 = 64;
-    const MEM_ADDR_WIDTH: u32 = 20;
+    const MEM_ADDR_WIDTH: u32 = 20; // TODO: target に応じて変えられるようにするべき
 
     // opcode
     const OP_LUI      : logic<7> = 7'b0110111;
@@ -35,6 +35,7 @@ package eei {
         MTVEC = 12'h305,
         MEPC = 12'h341,
         MCAUSE = 12'h342,
+        LED = 12'h800,
     }
 
     enum CsrCause: UIntX {

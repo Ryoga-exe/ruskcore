@@ -1,3 +1,4 @@
+#[ifdef(SIMULATION)]
 embed (inline) sv{{{
     package svutil;
         import "DPI-C" context function string get_env_value(input string key);
@@ -8,9 +9,23 @@ embed (inline) sv{{{
 }}}
 
 package util {
-    function get_env (
-        name: input string,
+    #[ifdef(SIMULATION)]
+    function resolve_filepath (
+        filepath       : input string,
+        filepath_is_env: input logic ,
     ) -> string {
-        return $sv::svutil::get_env(name);
+        if filepath_is_env {
+            return $sv::svutil::get_env(filepath);
+        } else {
+            return filepath;
+        }
+    }
+
+    #[ifndef(SIMULATION)]
+    function resolve_filepath (
+        filepath        : input string,
+        _filepath_is_env: input logic ,
+    ) -> string {
+        return filepath;
     }
 }

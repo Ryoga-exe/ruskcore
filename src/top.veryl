@@ -8,6 +8,7 @@ module top #(
     test_success: output bit  ,
     clk         : input  clock,
     rst         : input  reset,
+    led         : output UIntX,
 ) {
     // address to memory address in data units
     function addr_to_memaddr (
@@ -68,7 +69,7 @@ module top #(
         membus  ,
     );
 
-    inst c: core ( clk, rst, i_membus, d_membus );
+    inst c: core ( clk, rst, i_membus, d_membus, led );
 
     // riscv-test
     const RISCVTESTS_TOHOST_ADDR: Addr = 'h1000 as Addr;
