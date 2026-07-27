@@ -14,7 +14,7 @@ package eei {
 
     // memory
     const MEM_DATA_WIDTH: u32 = 64;
-    const MEM_ADDR_WIDTH: u32 = 10;
+    const MEM_ADDR_WIDTH: u32 = 20; // TODO: target に応じて変えられるようにするべき
 
     // opcode
     const OP_LUI      : logic<7> = 7'b0110111;
