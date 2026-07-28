@@ -33,7 +33,6 @@ interface membus_if::<DATA_WIDTH: u32, ADDR_WIDTH: u32> {
     modport response {
         rvalid: output,
         rdata : output,
-        ..input
     }
 
     modport slave_output {
