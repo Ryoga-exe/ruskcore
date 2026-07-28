@@ -90,6 +90,7 @@ module muldivunit (
         remainder: du_remainder             ,
     );
 
+    // state
     always_comb {
         ready  = (state == State::Idle);
         rvalid = (state == State::Finish);
@@ -128,6 +129,14 @@ module muldivunit (
                         2'b11  : mu_result[XLEN+:XLEN], // MULHU
                         default: 0,
                     };
+                } else if !is_mul && du_rvalid {
+                    // div is done
+                    result = case funct3_saved[1:0] {
+                        2'b01  : du_quotient, // DIVU
+                        2'b11  : du_remainder, // REMU
+                        default: 0,
+                    };
+                    state = State::Finish;
                 }
                 State::Finish: state = State::Idle;
                 default      : {}
