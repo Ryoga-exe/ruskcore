@@ -47,6 +47,7 @@ interface membus_if::<DATA_WIDTH: u32, ADDR_WIDTH: u32> {
         wen  : output,
         wdata: output,
         wmask: output,
+        ..input
     }
 
     // get DATA_WIDTH-bit expanded wmask

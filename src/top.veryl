@@ -89,7 +89,7 @@ module top #(
     inst c: core ( clk, rst, i_membus, d_membus, led );
 
     // riscv-test
-    const RISCVTESTS_TOHOST_ADDR: Addr = 'h1000 as Addr;
+    const RISCVTESTS_TOHOST_ADDR: Addr = MMAP_RAM_BEGIN + 'h1000 as Addr;
     #[ifdef(TEST_MODE)]
     always_ff {
         if d_membus.valid && d_membus.ready {
