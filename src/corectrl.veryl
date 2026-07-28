@@ -47,4 +47,11 @@ package corectrl {
     ) -> logic {
         return ctrl.itype == InstType::B;
     }
+
+    /// Struct for exceptions
+    struct ExceptionInfo {
+        valid: logic   ,
+        cause: CsrCause,
+        value: UIntX   ,
+    }
 }
