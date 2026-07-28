@@ -40,13 +40,13 @@ module muldivunit (
     var mu_result: logic<MUL_RES_WIDTH>;
 
     let mu_op1: logic<MUL_OP_WIDTH> = case funct3[1:0] {
-        2'b00, 2'b01: abs::<XLEN>(op1), // MUL, MULH
-        2'b11       : op1, // MULHU
-        default     : 0,
+        2'b00, 2'b01, 2'b10: abs::<XLEN>(op1), // MUL, MULH, MULHSU
+        2'b11              : op1, // MULHU
+        default            : 0,
     };
     let mu_op2: logic<MUL_OP_WIDTH> = case funct3[1:0] {
         2'b00, 2'b01: abs::<XLEN>(op2), // MUL, MULH
-        2'b11       : op2, // MULHU
+        2'b11, 2'b10: op2, // MULHU, MULHSU
         default     : 0,
     };
 
@@ -88,10 +88,13 @@ module muldivunit (
                     :
                         mu_result
                     ;
-                    state      = State::Finish;
-                    result     = case funct3_saved[1:0] {
+                    let res_mulhsu: logic<MUL_RES_WIDTH> = if op1sign_saved == 1 ? ~mu_result + 1 : mu_result;
+
+                    state  = State::Finish;
+                    result = case funct3_saved[1:0] {
                         2'b00  : res_signed[XLEN - 1:0], // MUL
                         2'b01  : res_signed[XLEN+:XLEN], // MULH
+                        2'b10  : res_mulhsu[XLEN+:XLEN], // MULHSU
                         2'b11  : mu_result[XLEN+:XLEN], // MULHU
                         default: 0,
                     };
