@@ -4,12 +4,13 @@ const Io = std.Io;
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
     const args = try init.minimal.args.toSlice(allocator);
-    if (args.len != 5) usage();
+    if (args.len != 6) usage();
 
     const simulator = args[1];
-    const output_path = args[2];
-    const max_cycles = args[3];
-    const image_path = args[4];
+    const rom_path = args[2];
+    const output_path = args[3];
+    const max_cycles = args[4];
+    const image_path = args[5];
 
     const cwd = Io.Dir.cwd();
     try cwd.deleteTree(init.io, output_path);
@@ -52,7 +53,7 @@ pub fn main(init: std.process.Init) !void {
         const log_name = try std.fmt.allocPrint(allocator, "{s}.txt", .{name});
         var log_file = try output_dir.createFile(init.io, log_name, .{});
 
-        const child_args = [_][]const u8{ simulator, image, max_cycles };
+        const child_args = [_][]const u8{ simulator, rom_path, image, max_cycles };
         var child = try std.process.spawn(init.io, .{
             .argv = &child_args,
             .stdin = .ignore,
@@ -81,7 +82,7 @@ pub fn main(init: std.process.Init) !void {
 
 fn usage() noreturn {
     std.process.fatal(
-        "usage: test-runner <simulator> <output-dir> <max-cycles> <image-dir>",
+        "usage: test-runner <simulator> <rom> <output-dir> <max-cycles> <image-dir>",
         .{},
     );
 }

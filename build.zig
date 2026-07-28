@@ -22,6 +22,12 @@ const FpgaConfig = struct {
 pub fn build(b: *std.Build) void {
     const riscv_tests = b.dependency("riscv_tests", .{});
     const riscv_test_env = b.dependency("riscv_test_env", .{});
+    const rom_path = b.option(
+        []const u8,
+        "rom",
+        "ROM image used by the Verilator simulator",
+    ) orelse "bootrom.hex";
+    const rom = pathOption(b, rom_path);
 
     const veryl_fmt = b.addSystemCommand(&.{ "veryl", "fmt", "--quiet" });
     const fmt_step = b.step("fmt", "Format the Veryl sources");
@@ -110,13 +116,17 @@ pub fn build(b: *std.Build) void {
 
     const run_simulator = std.Build.Step.Run.create(b, "run simulator");
     run_simulator.addFileArg(simulator);
+    run_simulator.addFileArg(rom);
     if (b.args) |args| {
         run_simulator.addArgs(args);
     } else {
         run_simulator.addFileArg(b.path("test/sample.hex"));
         run_simulator.addArg("100");
     }
-    const run_step = b.step("run", "Run the simulator (default: test/sample.hex)");
+    const run_step = b.step(
+        "run",
+        "Run the simulator (default ROM: bootrom.hex, RAM: test/sample.hex)",
+    );
     run_step.dependOn(&run_simulator.step);
 
     const bin2hex = addHostTool(b, "bin2hex", "tools/bin2hex.zig");
@@ -135,6 +145,7 @@ pub fn build(b: *std.Build) void {
     const test_images = b.addWriteFiles();
     const run_tests = b.addRunArtifact(test_runner);
     run_tests.addFileArg(test_simulator);
+    run_tests.addFileArg(rom);
     run_tests.addArg(b.getInstallPath(.prefix, "test-results"));
     run_tests.addArg(b.fmt("{d}", .{test_cycles}));
     run_tests.addDirectoryArg(test_images.getDirectory());
@@ -184,6 +195,13 @@ pub fn build(b: *std.Build) void {
         build_tests_step.dependOn(&test_images.step);
         test_step.dependOn(&run_tests.step);
     }
+}
+
+fn pathOption(b: *std.Build, path: []const u8) std.Build.LazyPath {
+    return if (std.fs.path.isAbsolute(path))
+        .{ .cwd_relative = path }
+    else
+        b.path(path);
 }
 
 fn fpgaConfig(board: FpgaBoard) FpgaConfig {
