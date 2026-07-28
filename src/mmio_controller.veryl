@@ -9,20 +9,25 @@ module mmio_controller (
         UNKNOWN,
     }
 
-    inst req_saved: Membus;
+    struct Request {
+        valid: logic                       ,
+        addr : Addr                        ,
+        wen  : logic                       ,
+        wdata: logic<MEMBUS_DATA_WIDTH>    ,
+        wmask: logic<MEMBUS_DATA_WIDTH / 8>,
+    }
 
-    var last_device : Device;
-    var is_requested: logic ;
+    var req_saved   : Request;
+    var last_device : Device ;
+    var is_requested: logic  ;
 
-    // reset master with 0
-    function reset_membus_master (
-        master: modport Membus::master_output,
-    ) {
-        master.valid = 0;
-        master.addr  = 0;
-        master.wen   = 0;
-        master.wdata = 0;
-        master.wmask = 0;
+    // Reset saved request with 0
+    function reset_saved_request () {
+        req_saved.valid = 0;
+        req_saved.addr  = 0;
+        req_saved.wen   = 0;
+        req_saved.wdata = 0;
+        req_saved.wmask = 0;
     }
 
     // Reset all device's master
@@ -37,7 +42,11 @@ module mmio_controller (
 
     // Assign req information to the device's master
     function assign_device_master (
-        req: modport Membus::all_input,
+        valid: input logic                       ,
+        addr : input Addr                        ,
+        wen  : input logic                       ,
+        wdata: input logic<MEMBUS_DATA_WIDTH>    ,
+        wmask: input logic<MEMBUS_DATA_WIDTH / 8>,
     ) {}
 
     // Assign device rvalid and rdata to req
@@ -90,17 +99,23 @@ module mmio_controller (
                 if get_device_rvalid(last_device) {
                     // Accept new request
                     if req_core.ready && req_core.valid {
-                        assign_device_master(req_core);
+                        assign_device_master(
+                            req_core.valid,
+                            req_core.addr,
+                            req_core.wen,
+                            req_core.wdata,
+                            req_core.wmask,
+                        );
                     }
                 }
             } else {
                 // Assign req_saved to device
-                assign_device_master(req_saved);
+                assign_device_master(req_saved.valid, req_saved.addr, req_saved.wen, req_saved.wdata, req_saved.wmask);
             }
         } else {
             // Accept new request
             if req_core.ready && req_core.valid {
-                assign_device_master(req_core);
+                assign_device_master(req_core.valid, req_core.addr, req_core.wen, req_core.wdata, req_core.wmask);
             }
         }
     }
@@ -136,7 +151,7 @@ module mmio_controller (
     function on_reset () {
         last_device         = Device::UNKNOWN;
         is_requested        = 0;
-        reset_membus_master(req_saved);
+        reset_saved_request();
     }
 
     always_ff {
