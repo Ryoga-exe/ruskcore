@@ -10,6 +10,12 @@ const RiscvTestArtifacts = struct {
     image: std.Build.LazyPath,
 };
 
+const SimulatorOptions = struct {
+    test_mode: bool = false,
+    print_debug: bool = false,
+    enable_debug_input: bool = false,
+};
+
 const FpgaBoard = enum {
     tangnano9k,
     tangnano20k,
@@ -120,7 +126,9 @@ pub fn build(b: *std.Build) void {
     const fmax_step = b.step("fmax", "Estimate fmax from the critical path");
     fmax_step.dependOn(&run_fmax.step);
 
-    const simulator = addSimulator(b, veryl_build, false, print_debug);
+    const simulator = addSimulator(b, veryl_build, .{
+        .print_debug = print_debug,
+    });
     const sim_step = b.step("sim", "Build the Verilator simulator");
     simulator.addStepDependencies(sim_step);
 
@@ -145,7 +153,7 @@ pub fn build(b: *std.Build) void {
     const bin2hex_step = b.step("bin2hex", "Convert a binary file to a hex memory image");
     bin2hex_step.dependOn(&run_bin2hex.step);
 
-    const debug_output_image = addDebugOutputImage(b, bin2hex);
+    const debug_output_image = addDebugImage(b, bin2hex, "debug_output");
     const install_debug_output_image = b.addInstallFile(
         debug_output_image,
         "test/debug_output.hex",
@@ -169,7 +177,42 @@ pub fn build(b: *std.Build) void {
     );
     debug_output_step.dependOn(&run_debug_output.step);
 
-    const test_simulator = addSimulator(b, veryl_build, true, print_debug);
+    const debug_input_image = addDebugImage(b, bin2hex, "debug_input");
+    const install_debug_input_image = b.addInstallFile(
+        debug_input_image,
+        "test/debug_input.hex",
+    );
+    const debug_input_image_step = b.step(
+        "debug-input-image",
+        "Build the debug MMIO input example RAM image",
+    );
+    debug_input_image_step.dependOn(&install_debug_input_image.step);
+
+    const debug_input_simulator = addSimulator(b, veryl_build, .{
+        .print_debug = print_debug,
+        .enable_debug_input = true,
+    });
+    const run_debug_input = std.Build.Step.Run.create(b, "run debug MMIO input example");
+    run_debug_input.addFileArg(debug_input_simulator);
+    run_debug_input.addFileArg(rom);
+    run_debug_input.addFileArg(debug_input_image);
+    if (b.args) |args| {
+        run_debug_input.addArgs(args);
+    } else {
+        run_debug_input.addArg("0");
+    }
+    run_debug_input.setEnvironmentVariable("DBG_ADDR", "0x40000000");
+    run_debug_input.has_side_effects = true;
+    const debug_input_step = b.step(
+        "debug-input",
+        "Build and run the interactive debug MMIO input example with Verilator",
+    );
+    debug_input_step.dependOn(&run_debug_input.step);
+
+    const test_simulator = addSimulator(b, veryl_build, .{
+        .test_mode = true,
+        .print_debug = print_debug,
+    });
     const test_runner = addHostTool(b, "test-runner", "tools/test_runner.zig");
     const test_cycles = b.option(
         u64,
@@ -366,9 +409,10 @@ fn addRiscvTest(
     };
 }
 
-fn addDebugOutputImage(
+fn addDebugImage(
     b: *std.Build,
     bin2hex: *std.Build.Step.Compile,
+    name: []const u8,
 ) std.Build.LazyPath {
     const riscv = std.Target.riscv;
     const target = b.resolveTargetQuery(.{
@@ -386,24 +430,24 @@ fn addDebugOutputImage(
     });
     module.addAssemblyFile(b.path("test/entry.S"));
     module.addCSourceFile(.{
-        .file = b.path("test/debug_output.c"),
+        .file = b.path(b.fmt("test/{s}.c", .{name})),
         .flags = &.{ "-std=c11", "-ffreestanding" },
     });
 
     const elf = b.addExecutable(.{
-        .name = "debug-output",
+        .name = name,
         .root_module = module,
     });
     elf.setLinkerScript(b.path("test/link.ld"));
 
     const binary = elf.addObjCopy(.{
-        .basename = "debug_output.bin",
+        .basename = b.fmt("{s}.bin", .{name}),
         .format = .bin,
     });
     const convert = b.addRunArtifact(bin2hex);
     convert.addArg("8");
     convert.addFileArg(binary.getOutput());
-    return convert.captureStdOut(.{ .basename = "debug_output.hex" });
+    return convert.captureStdOut(.{ .basename = b.fmt("{s}.hex", .{name}) });
 }
 
 fn parseTestSuite(name: []const u8) ?TestSuite {
@@ -431,12 +475,24 @@ fn matchesAnyFilter(name: []const u8, filters: []const []const u8) bool {
 fn addSimulator(
     b: *std.Build,
     veryl_build: *std.Build.Step.Run,
-    test_mode: bool,
-    print_debug: bool,
+    options: SimulatorOptions,
 ) std.Build.LazyPath {
-    const executable_name = if (test_mode) "test-sim" else "sim";
-    const output_name = if (test_mode) "verilator-test" else "verilator";
-    const cflags = if (test_mode) "-std=c++17 -DTEST_MODE" else "-std=c++17";
+    const executable_name = if (options.enable_debug_input)
+        "debug-input-sim"
+    else if (options.test_mode)
+        "test-sim"
+    else
+        "sim";
+    const output_name = if (options.enable_debug_input)
+        "verilator-debug-input"
+    else if (options.test_mode)
+        "verilator-test"
+    else
+        "verilator";
+    const cflags = b.fmt("-std=c++17{s}{s}", .{
+        if (options.test_mode) " -DTEST_MODE" else "",
+        if (options.enable_debug_input) " -DENABLE_DEBUG_INPUT" else "",
+    });
 
     const verilator = b.addSystemCommand(&.{
         "verilator",
@@ -446,8 +502,9 @@ fn addSimulator(
         "0",
     });
     verilator.addArg("-DSIMULATION");
-    if (test_mode) verilator.addArg("-DTEST_MODE");
-    if (print_debug) verilator.addArg("-DPRINT_DEBUG");
+    if (options.test_mode) verilator.addArg("-DTEST_MODE");
+    if (options.print_debug) verilator.addArg("-DPRINT_DEBUG");
+    if (options.enable_debug_input) verilator.addArg("-DENABLE_DEBUG_INPUT");
     verilator.addArgs(&.{
         "--top-module",
         "ruskcore_top",
