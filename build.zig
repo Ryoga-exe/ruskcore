@@ -5,6 +5,11 @@ const TestSuite = struct {
     arch: std.Target.Cpu.Arch,
 };
 
+const RiscvTestArtifacts = struct {
+    elf: std.Build.LazyPath,
+    image: std.Build.LazyPath,
+};
+
 const FpgaBoard = enum {
     tangnano9k,
     tangnano20k,
@@ -171,6 +176,11 @@ pub fn build(b: *std.Build) void {
         "test-cycles",
         "Maximum simulation cycles per RISC-V test (0 for no limit)",
     ) orelse 1_000_000;
+    const debug_label = b.option(
+        []const u8,
+        "debug-label",
+        "ELF section mapped to the simulator debug device",
+    ) orelse ".tohost";
     const test_images = b.addWriteFiles();
     const run_tests = b.addRunArtifact(test_runner);
     run_tests.addFileArg(test_simulator);
@@ -178,7 +188,7 @@ pub fn build(b: *std.Build) void {
     run_tests.addArg(b.getInstallPath(.prefix, "test-results"));
     run_tests.addArg(b.fmt("{d}", .{test_cycles}));
     run_tests.addDirectoryArg(test_images.getDirectory());
-    run_tests.setEnvironmentVariable("DBG_ADDR", "0x80001000");
+    run_tests.addArg(debug_label);
     run_tests.has_side_effects = true;
     const build_tests_step = b.step("riscv-tests", "Build the RISC-V test images");
     const test_step = b.step("test", "Run the RISC-V tests with Verilator");
@@ -206,7 +216,7 @@ pub fn build(b: *std.Build) void {
             if (!matchesAnyFilter(test_name, filters)) continue;
             selected_tests += 1;
 
-            const image = addRiscvTest(
+            const artifacts = addRiscvTest(
                 b,
                 bin2hex,
                 riscv_tests,
@@ -214,7 +224,8 @@ pub fn build(b: *std.Build) void {
                 suite,
                 name,
             );
-            _ = test_images.addCopyFile(image, b.fmt("{s}.hex", .{test_name}));
+            _ = test_images.addCopyFile(artifacts.elf, test_name);
+            _ = test_images.addCopyFile(artifacts.image, b.fmt("{s}.hex", .{test_name}));
         }
     }
     if (selected_tests == 0) {
@@ -304,7 +315,7 @@ fn addRiscvTest(
     riscv_test_env: *std.Build.Dependency,
     suite: TestSuite,
     name: []const u8,
-) std.Build.LazyPath {
+) RiscvTestArtifacts {
     const riscv = std.Target.riscv;
     const target = b.resolveTargetQuery(.{
         .cpu_arch = suite.arch,
@@ -349,7 +360,10 @@ fn addRiscvTest(
     const convert = b.addRunArtifact(bin2hex);
     convert.addArg("8");
     convert.addFileArg(binary.getOutput());
-    return convert.captureStdOut(.{ .basename = b.fmt("{s}.hex", .{test_name}) });
+    return .{
+        .elf = elf.getEmittedBin(),
+        .image = convert.captureStdOut(.{ .basename = b.fmt("{s}.hex", .{test_name}) }),
+    };
 }
 
 fn addDebugOutputImage(
