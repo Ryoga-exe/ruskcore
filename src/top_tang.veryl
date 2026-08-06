@@ -20,9 +20,10 @@ module top_tang #(
         RAM_FILEPATH       : "test/led_counter.hex",
     ) (
         #[ifdef(TEST_MODE)]
-        test_success: _       ,
-        clk                   ,
-        rst         : core_rst,
-        led         : led_top ,
+        test_success : _       ,
+        MMAP_DBG_ADDR: 0       ,
+        clk                    ,
+        rst          : core_rst,
+        led          : led_top ,
     );
 }

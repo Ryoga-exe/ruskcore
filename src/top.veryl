@@ -7,10 +7,11 @@ module top #(
     param ROM_FILEPATH       : string = "ROM_FILE_PATH",
 ) (
     #[ifdef(TEST_MODE)]
-    test_success: output bit  ,
-    clk         : input  clock,
-    rst         : input  reset,
-    led         : output UIntX,
+    test_success : output bit  ,
+    MMAP_DBG_ADDR: input  Addr ,
+    clk          : input  clock,
+    rst          : input  reset,
+    led          : output UIntX,
 ) {
     // address to memory address in data units
     function addr_to_memaddr::<DATA_WIDTH: u32, ADDR_WIDTH: u32> (
@@ -24,6 +25,7 @@ module top #(
     inst mmio_rom_membus: Membus;
     inst ram_membus     : membus_if::<RAM_DATA_WIDTH, RAM_ADDR_WIDTH>;
     inst rom_membus     : membus_if::<ROM_DATA_WIDTH, ROM_ADDR_WIDTH>;
+    inst dbg_membus     : Membus;
     inst i_membus       : membus_if::<ILEN, XLEN>; // for instruction fetch
     inst d_membus       : Membus; // for load/store
 
@@ -70,9 +72,11 @@ module top #(
     inst mmioc: mmio_controller (
         clk                        ,
         rst                        ,
+        DBG_ADDR  : MMAP_DBG_ADDR  ,
         req_core  : mmio_membus    ,
         ram_membus: mmio_ram_membus,
         rom_membus: mmio_rom_membus,
+        dbg_membus                 ,
     );
 
     inst ram: memory::<RAM_DATA_WIDTH, RAM_ADDR_WIDTH> #(
@@ -119,19 +123,27 @@ module top #(
 
     inst c: core ( clk, rst, i_membus, d_membus, led );
 
-    // riscv-test
-    const RISCVTESTS_TOHOST_ADDR: Addr = MMAP_RAM_BEGIN + 'h1000 as Addr;
-    #[ifdef(TEST_MODE)]
+    // debug IO
     always_ff {
-        if d_membus.valid && d_membus.ready {
-            case d_membus.addr {
-                RISCVTESTS_TOHOST_ADDR: if d_membus.wen == 1 && d_membus.wdata[lsb] == 1'b1 {
-                    test_success = d_membus.wdata == 1;
-                    if d_membus.wdata == 1 {
-                        $display("riscv-tests success!");
+        dbg_membus.ready  = 1;
+        dbg_membus.rvalid = dbg_membus.valid;
+        dbg_membus.rdata  = 0;
+        if dbg_membus.valid {
+            if dbg_membus.wen {
+                if dbg_membus.wdata[MEMBUS_DATA_WIDTH - 1-:20] == 20'h01010 {
+                    $write("%c", dbg_membus.wdata[7:0]);
+                } else if dbg_membus.wdata[MEMBUS_DATA_WIDTH - 1-:20] == 20'h10101 {
+                    $display("signature: %h", dbg_membus.wdata[31:0]);
+                } else if dbg_membus.wdata[lsb] == 1'b1 {
+                    #[ifdef(TEST_MODE)]
+                    block {
+                        test_success = dbg_membus.wdata == 1;
+                    }
+                    if dbg_membus.wdata == 1 {
+                        $display("test success!");
                     } else {
-                        $display("riscv-tests failed!");
-                        $error  ("wdata : %h", d_membus.wdata);
+                        $display("test failed!");
+                        $error  ("wdata : %h", dbg_membus.wdata);
                     }
                     $finish();
                 }
