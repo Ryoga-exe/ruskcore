@@ -9,6 +9,23 @@ embed (inline) sv{{{
         function longint get_input();
             return get_input_dpic();
         endfunction
+        `ifdef KONATA_TRACE
+        import "DPI-C" context function void konata_init_dpic();
+        import "DPI-C" context function void konata_cycle_dpic();
+        import "DPI-C" context function void konata_stage_dpic(
+            input int unsigned stage,
+            input longint unsigned id,
+            input longint unsigned pc,
+            input int unsigned bits
+        );
+        import "DPI-C" context function void konata_retire_dpic(
+            input longint unsigned id,
+            input bit flushed
+        );
+        import "DPI-C" context function void konata_flush_dpic(
+            input longint unsigned id
+        );
+        `endif
     endpackage
 }}}
 
@@ -35,5 +52,40 @@ package util {
 
     function get_input () -> u64 {
         return $sv::svutil::get_input();
+    }
+
+    #[ifdef(KONATA_TRACE)]
+    function konata_init () {
+        $sv::svutil::konata_init_dpic();
+    }
+
+    #[ifdef(KONATA_TRACE)]
+    function konata_cycle () {
+        $sv::svutil::konata_cycle_dpic();
+    }
+
+    #[ifdef(KONATA_TRACE)]
+    function konata_stage (
+        stage: input u32,
+        id   : input u64,
+        pc   : input u64,
+        bits : input u32,
+    ) {
+        $sv::svutil::konata_stage_dpic(stage, id, pc, bits);
+    }
+
+    #[ifdef(KONATA_TRACE)]
+    function konata_retire (
+        id     : input u64  ,
+        flushed: input logic,
+    ) {
+        $sv::svutil::konata_retire_dpic(id, flushed);
+    }
+
+    #[ifdef(KONATA_TRACE)]
+    function konata_flush (
+        id: input u64,
+    ) {
+        $sv::svutil::konata_flush_dpic(id);
     }
 }

@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 
@@ -27,6 +28,51 @@ extern "C" const unsigned long long get_input_dpic() {
     }
     return 0;
 }
+
+#ifdef KONATA_TRACE
+namespace {
+std::ofstream konata_raw_trace;
+
+bool konata_enabled() { return konata_raw_trace.is_open(); }
+}  // namespace
+
+extern "C" void konata_init_dpic() {
+    const char* path = getenv("KONATA_FILE");
+    if (path == nullptr || path[0] == '\0') return;
+
+    if (konata_raw_trace.is_open()) konata_raw_trace.close();
+    konata_raw_trace.open(path, std::ios::out | std::ios::trunc);
+    if (!konata_raw_trace) {
+        std::cerr << "Unable to open raw pipeline trace: " << path << std::endl;
+        std::abort();
+    }
+    konata_raw_trace << "RuskTrace\t0001\n";
+}
+
+extern "C" void konata_cycle_dpic() {
+    if (konata_enabled()) konata_raw_trace << "C\n";
+}
+
+extern "C" void konata_stage_dpic(unsigned int stage, unsigned long long id, unsigned long long pc, unsigned int bits) {
+    if (!konata_enabled()) return;
+    konata_raw_trace << "P\t" << stage << '\t' << id << '\t' << pc << '\t' << bits << '\n';
+}
+
+extern "C" void konata_retire_dpic(unsigned long long id, unsigned char flushed) {
+    if (!konata_enabled()) return;
+    konata_raw_trace << "R\t" << id << '\t' << static_cast<unsigned int>(flushed) << '\n';
+}
+
+extern "C" void konata_flush_dpic(unsigned long long id) {
+    if (!konata_enabled()) return;
+    konata_raw_trace << "F\t" << id << '\n';
+}
+
+void konata_finish() {
+    if (!konata_enabled()) return;
+    konata_raw_trace.flush();
+}
+#endif
 
 struct termios old_setting;
 
@@ -70,7 +116,11 @@ int main(int argc, char** argv) {
     Verilated::commandArgs(argc, argv);
 
     if (argc < 3) {
-        std::cout << "Usage: " << argv[0] << "ROM_FILE_PATH RAM_FILE_PATH [CYCLE]" << std::endl;
+        std::cout << "Usage: " << argv[0] << " ROM_FILE_PATH RAM_FILE_PATH [CYCLE]"
+#ifdef KONATA_TRACE
+                  << " KONATA_TRACE"
+#endif
+                  << std::endl;
         return 1;
     }
 
@@ -101,6 +151,20 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
+
+#ifdef KONATA_TRACE
+    if (argc < 5) {
+        std::cerr << "KONATA_TRACE is required when tracing is enabled" << std::endl;
+        return 1;
+    }
+    try {
+        const std::string konata_file_path = fs::absolute(argv[4]).string();
+        setenv("KONATA_FILE", konata_file_path.c_str(), 1);
+    } catch (const std::exception& e) {
+        std::cerr << "Invalid Konata log path: " << e.what() << std::endl;
+        return 1;
+    }
+#endif
 
     // 環境変数でメモリの初期化用ファイルを指定する
     const char* original_env_rom = getenv("ROM_FILE_PATH");
@@ -139,6 +203,10 @@ int main(int argc, char** argv) {
     }
 
     dut->final();
+
+#ifdef KONATA_TRACE
+    konata_finish();
+#endif
 
 #ifdef TEST_MODE
     return dut->test_success != 1;
