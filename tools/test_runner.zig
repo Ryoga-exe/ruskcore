@@ -1,10 +1,11 @@
 const std = @import("std");
+const konata_trace = @import("konata_trace.zig");
 const Io = std.Io;
 
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
     const args = try init.minimal.args.toSlice(allocator);
-    if (args.len != 7) usage();
+    if (args.len != 8) usage();
 
     const simulator = args[1];
     const rom_path = args[2];
@@ -12,12 +13,14 @@ pub fn main(init: std.process.Init) !void {
     const max_cycles = args[4];
     const image_path = args[5];
     const debug_label = args[6];
+    const enable_konata = std.mem.eql(u8, args[7], "1");
 
     const cwd = Io.Dir.cwd();
     try cwd.deleteTree(init.io, output_path);
     try cwd.createDirPath(init.io, output_path);
     var output_dir = try cwd.openDir(init.io, output_path, .{});
     defer output_dir.close(init.io);
+    if (enable_konata) try output_dir.createDirPath(init.io, "konata");
     var image_dir = try cwd.openDir(init.io, image_path, .{ .iterate = true });
     defer image_dir.close(init.io);
 
@@ -65,8 +68,25 @@ pub fn main(init: std.process.Init) !void {
         var log_file = try output_dir.createFile(init.io, log_name, .{});
 
         const child_args = [_][]const u8{ simulator, rom_path, image, max_cycles };
+        const konata_name = try std.fmt.allocPrint(allocator, "{s}.log", .{name});
+        const konata_path = try std.fs.path.join(
+            allocator,
+            &.{ output_path, "konata", konata_name },
+        );
+        const raw_name = try std.fmt.allocPrint(allocator, "{s}.trace", .{name});
+        const raw_path = try std.fs.path.join(
+            allocator,
+            &.{ output_path, "konata", raw_name },
+        );
+        const konata_child_args = [_][]const u8{
+            simulator,
+            rom_path,
+            image,
+            max_cycles,
+            raw_path,
+        };
         var child = try std.process.spawn(init.io, .{
-            .argv = &child_args,
+            .argv = if (enable_konata) &konata_child_args else &child_args,
             .stdin = .ignore,
             .stdout = .{ .file = log_file },
             .stderr = .{ .file = log_file },
@@ -74,6 +94,10 @@ pub fn main(init: std.process.Init) !void {
         });
         const term = try child.wait(init.io);
         log_file.close(init.io);
+        if (enable_konata) {
+            try konata_trace.convert(init.io, allocator, raw_path, konata_path);
+            try cwd.deleteFile(init.io, raw_path);
+        }
 
         const success = term == .exited and term.exited == 0;
         if (success) passed += 1;
@@ -145,7 +169,7 @@ fn getSectionAddress(
 
 fn usage() noreturn {
     std.process.fatal(
-        "usage: test-runner <simulator> <rom> <output-dir> <max-cycles> <image-dir> <debug-label>",
+        "usage: test-runner <simulator> <rom> <output-dir> <max-cycles> <image-dir> <debug-label> <konata:0|1>",
         .{},
     );
 }
