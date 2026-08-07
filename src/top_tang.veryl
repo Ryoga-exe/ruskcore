@@ -16,13 +16,14 @@ module top_tang #(
     }
 
     inst t: top #(
-        MEMORY_FILEPATH_IS_ENV: 0                     ,
-        MEMORY_FILEPATH       : "test/led_counter.hex",
+        RAM_FILEPATH_IS_ENV: 0                     ,
+        RAM_FILEPATH       : "test/led_counter.hex",
     ) (
         #[ifdef(TEST_MODE)]
-        test_success: _       ,
-        clk                   ,
-        rst         : core_rst,
-        led         : led_top ,
+        test_success : _       ,
+        MMAP_DBG_ADDR: 0       ,
+        clk                    ,
+        rst          : core_rst,
+        led          : led_top ,
     );
 }
