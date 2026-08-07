@@ -42,6 +42,16 @@ module core (
     var wbq_rvalid: logic   ;
     var wbq_rdata : wbq_type;
 
+    #[ifdef(KONATA_TRACE)]
+    {
+        var trace_next_id : u64;
+        var if_trace_wdata: u64;
+        var id_trace_id   : u64;
+        var ex_trace_id   : u64;
+        var mem_trace_id  : u64;
+        var wb_trace_id   : u64;
+    }
+
     // ====================================================
     // * IF stage
     // ====================================================
@@ -97,6 +107,10 @@ module core (
         if_reset {
             if_fifo_wvalid = 0;
             if_fifo_wdata  = 0;
+            #[ifdef(KONATA_TRACE)]
+            block {
+                if_trace_wdata = 0;
+            }
         } else {
             if control_hazard {
                 if_fifo_wvalid = 0;
@@ -105,6 +119,10 @@ module core (
                     if_fifo_wvalid     = 1;
                     if_fifo_wdata.addr = if_pc_requested;
                     if_fifo_wdata.bits = i_membus.rdata;
+                    #[ifdef(KONATA_TRACE)]
+                    block {
+                        if_trace_wdata = trace_next_id;
+                    }
                 } else {
                     if if_fifo_wvalid && if_fifo_wready {
                         // FIFO にデータを格納できる
@@ -491,6 +509,67 @@ module core (
         rvalid: wbq_rvalid,
         rdata : wbq_rdata ,
     );
+
+    #[ifdef(KONATA_TRACE)]
+    {
+        inst if_trace_fifo: fifo #(
+            DATA_TYPE: u64,
+            WIDTH    : 3  ,
+        ) (
+            clk                       ,
+            rst                       ,
+            flush     : control_hazard,
+            wready    : _             ,
+            wready_two: _             ,
+            wvalid    : if_fifo_wvalid,
+            wdata     : if_trace_wdata,
+            rready    : if_fifo_rready,
+            rvalid    : _             ,
+            rdata     : id_trace_id   ,
+        );
+    }
+
+    // ====================================================
+    // * Konata pipeline trace
+    // ====================================================
+    #[ifdef(KONATA_TRACE)]
+    always_ff {
+        if_reset {
+            trace_next_id     = 0;
+            ex_trace_id       = 0;
+            mem_trace_id      = 0;
+            wb_trace_id       = 0;
+            util::konata_init();
+        } else {
+            if !control_hazard && if_is_requested && i_membus.rvalid {
+                util::konata_stage(0, trace_next_id, if_pc_requested, i_membus.rdata);
+                trace_next_id      += 1;
+            }
+            if !control_hazard && if_fifo_wvalid && if_fifo_wready {
+                util::konata_stage(1, if_trace_wdata, if_fifo_wdata.addr, if_fifo_wdata.bits);
+            }
+            if !control_hazard && if_fifo_rvalid && if_fifo_rready {
+                util::konata_stage(2, id_trace_id, if_fifo_rdata.addr, if_fifo_rdata.bits);
+                ex_trace_id        = id_trace_id;
+            }
+            if !control_hazard && exq_rvalid && exq_rready {
+                util::konata_stage(3, ex_trace_id, exq_rdata.addr, exq_rdata.bits);
+                mem_trace_id       = ex_trace_id;
+            }
+            if memq_rvalid && memq_rready {
+                util::konata_stage(4, mem_trace_id, memq_rdata.addr, memq_rdata.bits);
+                wb_trace_id        = mem_trace_id;
+            }
+            util::konata_cycle();
+
+            if control_hazard {
+                util::konata_flush(mem_trace_id);
+            }
+            if wbq_rvalid && wbq_rready {
+                util::konata_retire(wb_trace_id, wbq_rdata.raise_trap);
+            }
+        }
+    }
 
     // ====================================================
     // * Debug
