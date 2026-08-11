@@ -10,6 +10,8 @@ module amounit (
         Init,
         WaitReady,
         WaitValid,
+        SCSuccess,
+        SCFail,
     }
 
     var state: State;
@@ -47,6 +49,9 @@ module amounit (
             if slave.is_amo {
                 case slave.amoop {
                     AMOOp::LR: assign_master(slave.addr, 0, 0, 0);
+                    AMOOp::SC: if is_addr_reserved && slave.addr == reserved_addr {
+                        assign_master(slave.addr, 1, slave.wdata, slave.wmask);
+                    }
                     default  : {}
                 }
             } else {
@@ -70,6 +75,16 @@ module amounit (
                 slave.rvalid = master.rvalid;
                 slave.rdata  = master.rdata;
             }
+            State::SCSuccess: {
+                slave.ready  = master.rvalid;
+                slave.rvalid = master.rvalid;
+                slave.rdata  = 0;
+            }
+            State::SCFail: {
+                slave.ready  = 1;
+                slave.rvalid = 1;
+                slave.rdata  = 1;
+            }
             default: {}
         }
     }
@@ -82,13 +97,15 @@ module amounit (
             State::WaitReady: if slave_saved.is_amo {
                 case slave_saved.amoop {
                     AMOOp::LR: assign_master(slave_saved.addr, 0, 0, 0);
+                    AMOOp::SC: assign_master(slave_saved.addr, 1, slave_saved.wdata, slave_saved.wmask);
                     default  : {}
                 }
             } else {
                 assign_master(slave_saved.addr, slave_saved.wen, slave_saved.wdata, slave_saved.wmask);
             }
-            State::WaitValid: accept_request_comb();
-            default         : {}
+            State::WaitValid               : accept_request_comb();
+            State::SCFail, State::SCSuccess: accept_request_comb();
+            default                        : {}
         }
     }
 
@@ -110,8 +127,9 @@ module amounit (
             reserved_addr      = 0;
         } else {
             case state {
-                State::Init, State::WaitValid: {
-                    if (state != State::WaitValid || master.rvalid) {
+                State::Init, State::WaitValid, State::SCSuccess, State::SCFail: {
+                    if (state == State::Init || (state == State::WaitValid && master.rvalid)
+                        || (state == State::SCSuccess || master.rvalid) || state == State::SCFail) {
                         // accept_request_ff();
                         slave_saved.valid = slave.ready && slave.valid;
                         if slave.ready && slave.valid {
@@ -132,6 +150,17 @@ module amounit (
                                         reserved_addr    = slave.addr;
                                         state            = if master.ready ? State::WaitValid : State::WaitReady;
                                     }
+                                    AMOOp::SC: {
+                                        // reset reserved
+                                        let prev            : logic = is_addr_reserved;
+                                        is_addr_reserved = 0;
+                                        // check
+                                        if prev && slave.addr == reserved_addr {
+                                            state = if master.ready ? State::SCSuccess : State::WaitReady;
+                                        } else {
+                                            state = State::SCFail;
+                                        }
+                                    }
                                     default: {}
                                 }
                             } else {
@@ -142,9 +171,14 @@ module amounit (
                         }
                     }
                 }
-                State::WaitReady: {
-                    state = State::WaitValid;
+                State::WaitReady: if master.ready {
+                    if slave_saved.is_amo && slave_saved.amoop == AMOOp::SC {
+                        state = State::SCSuccess;
+                    } else {
+                        state = State::WaitValid;
+                    }
                 }
+                default: {}
             }
         }
     }
