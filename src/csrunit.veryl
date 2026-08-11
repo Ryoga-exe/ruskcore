@@ -52,14 +52,15 @@ module csrunit (
     always_comb {
         // read
         rdata = case csr_addr {
-            CsrAddr::MISA  : misa,
-            CsrAddr::MIMPID: MACHINE_IMPLEMENTATION_ID,
-            CsrAddr::MTVEC : mtvec,
-            CsrAddr::MEPC  : mepc,
-            CsrAddr::MCAUSE: mcause,
-            CsrAddr::MTVAL : mtval,
-            CsrAddr::LED   : led,
-            default        : 'x,
+            CsrAddr::MISA   : misa,
+            CsrAddr::MIMPID : MACHINE_IMPLEMENTATION_ID,
+            CsrAddr::MHARTID: mhartid,
+            CsrAddr::MTVEC  : mtvec,
+            CsrAddr::MEPC   : mepc,
+            CsrAddr::MCAUSE : mcause,
+            CsrAddr::MTVAL  : mtval,
+            CsrAddr::LED    : led,
+            default         : 'x,
         };
         // write
         wmask = case csr_addr {
