@@ -33,10 +33,15 @@ interface core_data_if {
     }
 
     modport slave {
+        is_Zaamo: import,
         ..converse(master)
     }
 
     modport all_input {
         ..input
+    }
+
+    function is_Zaamo () -> logic {
+        return is_amo && (amoop != AMOOp::LR && amoop != AMOOp::SC);
     }
 }
