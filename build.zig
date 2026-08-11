@@ -14,6 +14,7 @@ const SimulatorOptions = struct {
     test_mode: bool = false,
     print_debug: bool = false,
     enable_debug_input: bool = false,
+    enable_konata_trace: bool = false,
 };
 
 const FpgaBoard = enum {
@@ -43,6 +44,11 @@ pub fn build(b: *std.Build) void {
         bool,
         "print-debug",
         "Enable verbose simulation debug output",
+    ) orelse false;
+    const test_konata = b.option(
+        bool,
+        "konata",
+        "Generate a Konata pipeline trace for each RISC-V test",
     ) orelse false;
 
     const veryl_fmt = b.addSystemCommand(&.{ "veryl", "fmt", "--quiet" });
@@ -147,6 +153,39 @@ pub fn build(b: *std.Build) void {
     );
     run_step.dependOn(&run_simulator.step);
 
+    const konata_simulator = addSimulator(b, veryl_build, .{
+        .enable_konata_trace = true,
+    });
+    const run_konata = std.Build.Step.Run.create(b, "run simulator with Konata trace");
+    run_konata.addFileArg(konata_simulator);
+    run_konata.addFileArg(rom);
+    const konata_args_valid = if (b.args) |args| args.len == 2 else true;
+    if (b.args) |args| {
+        if (args.len == 2) {
+            run_konata.addFileArg(pathOption(b, args[0]));
+            run_konata.addArg(args[1]);
+        }
+    } else {
+        run_konata.addFileArg(b.path("test/sample.hex"));
+        run_konata.addArg("1000");
+    }
+    const konata_raw = run_konata.addOutputFileArg("konata.trace");
+    const konata_converter = addHostTool(b, "konata", "tools/konata.zig");
+    const convert_konata = b.addRunArtifact(konata_converter);
+    convert_konata.addFileArg(konata_raw);
+    const konata_log = convert_konata.addOutputFileArg("konata.log");
+    const install_konata_log = b.addInstallFile(konata_log, "trace/konata.log");
+    const konata_step = b.step(
+        "konata",
+        "Run the simulator and generate a Konata pipeline trace",
+    );
+    if (konata_args_valid) {
+        konata_step.dependOn(&install_konata_log.step);
+    } else {
+        const invalid_args = b.addFail("usage: zig build konata -- <RAM image> <cycles>");
+        konata_step.dependOn(&invalid_args.step);
+    }
+
     const bin2hex = addHostTool(b, "bin2hex", "tools/bin2hex.zig");
     const run_bin2hex = b.addRunArtifact(bin2hex);
     if (b.args) |args| run_bin2hex.addArgs(args);
@@ -212,6 +251,7 @@ pub fn build(b: *std.Build) void {
     const test_simulator = addSimulator(b, veryl_build, .{
         .test_mode = true,
         .print_debug = print_debug,
+        .enable_konata_trace = test_konata,
     });
     const test_runner = addHostTool(b, "test-runner", "tools/test_runner.zig");
     const test_cycles = b.option(
@@ -232,6 +272,7 @@ pub fn build(b: *std.Build) void {
     run_tests.addArg(b.fmt("{d}", .{test_cycles}));
     run_tests.addDirectoryArg(test_images.getDirectory());
     run_tests.addArg(debug_label);
+    run_tests.addArg(if (test_konata) "1" else "0");
     run_tests.has_side_effects = true;
     const build_tests_step = b.step("riscv-tests", "Build the RISC-V test images");
     const test_step = b.step("test", "Run the RISC-V tests with Verilator");
@@ -477,21 +518,26 @@ fn addSimulator(
     veryl_build: *std.Build.Step.Run,
     options: SimulatorOptions,
 ) std.Build.LazyPath {
-    const executable_name = if (options.enable_debug_input)
+    const executable_name = if (options.enable_konata_trace)
+        "konata-sim"
+    else if (options.enable_debug_input)
         "debug-input-sim"
     else if (options.test_mode)
         "test-sim"
     else
         "sim";
-    const output_name = if (options.enable_debug_input)
+    const output_name = if (options.enable_konata_trace)
+        "verilator-konata"
+    else if (options.enable_debug_input)
         "verilator-debug-input"
     else if (options.test_mode)
         "verilator-test"
     else
         "verilator";
-    const cflags = b.fmt("-std=c++17{s}{s}", .{
+    const cflags = b.fmt("-std=c++17{s}{s}{s}", .{
         if (options.test_mode) " -DTEST_MODE" else "",
         if (options.enable_debug_input) " -DENABLE_DEBUG_INPUT" else "",
+        if (options.enable_konata_trace) " -DKONATA_TRACE" else "",
     });
 
     const verilator = b.addSystemCommand(&.{
@@ -505,6 +551,7 @@ fn addSimulator(
     if (options.test_mode) verilator.addArg("-DTEST_MODE");
     if (options.print_debug) verilator.addArg("-DPRINT_DEBUG");
     if (options.enable_debug_input) verilator.addArg("-DENABLE_DEBUG_INPUT");
+    if (options.enable_konata_trace) verilator.addArg("-DKONATA_TRACE");
     verilator.addArgs(&.{
         "--top-module",
         "ruskcore_top",

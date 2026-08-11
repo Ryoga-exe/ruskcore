@@ -61,6 +61,16 @@ zig build test -- add
 
 The test runner prints every PASS/FAIL result and writes the summary and per-test simulator output under `zig-out/test-results`.
 
+## Konata
+
+Generate a [Konata](https://github.com/shioyadan/Konata) pipeline trace:
+
+```sh
+zig build konata
+
+zig build test -Dkonata -- rv64ui-p-addi
+```
+
 ## Utilities
 
 ```sh
