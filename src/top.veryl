@@ -28,6 +28,7 @@ module top #(
     inst dbg_membus     : Membus;
     inst i_membus       : membus_if::<ILEN, XLEN>; // for instruction fetch
     inst d_membus       : Membus; // for load/store
+    inst d_membus_core  : core_data_if;
 
     var memarb_last_i    : logic;
     var memarb_last_iaddr: Addr ;
@@ -121,7 +122,9 @@ module top #(
         mmio_rom_membus.rdata  = rom_membus.rdata;
     }
 
-    inst c: core ( clk, rst, i_membus, d_membus, led );
+    inst amou: amounit ( clk, rst, slave: d_membus_core, master: d_membus );
+
+    inst c: core ( clk, rst, i_membus, d_membus: d_membus_core, led );
 
     // debug IO
     always_ff {
