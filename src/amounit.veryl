@@ -18,8 +18,18 @@ module amounit (
         AMOStoreValid,
     }
 
-    var state: State;
-    inst slave_saved: core_data_if;
+    struct Request {
+        addr  : Addr                   ,
+        wen   : logic                  ,
+        wdata : UIntX                  ,
+        wmask : logic<$size(UIntX) / 8>,
+        is_amo: logic                  ,
+        amoop : AMOOp                  ,
+        funct3: logic<3>               ,
+    }
+
+    var state    : State  ;
+    var req_saved: Request;
 
     // lr/sc
     var is_addr_reserved: logic;
@@ -53,8 +63,8 @@ module amounit (
 
     // Generate wdata for Zaamo extension
     function gen_amo_wdata (
-        req  : modport core_data_if::all_input,
-        rdata: input   UIntX                  ,
+        req  : input Request,
+        rdata: input UIntX  ,
     ) -> UIntX {
         case req.funct3 {
             3'b010: {
@@ -150,22 +160,22 @@ module amounit (
         reset_master();
         case state {
             State::Init     : accept_request_comb();
-            State::WaitReady: if slave_saved.is_amo {
-                case slave_saved.amoop {
-                    AMOOp::LR: assign_master(slave_saved.addr, 0, 0, 0);
-                    AMOOp::SC: assign_master(slave_saved.addr, 1, slave_saved.wdata, slave_saved.wmask);
+            State::WaitReady: if req_saved.is_amo {
+                case req_saved.amoop {
+                    AMOOp::LR: assign_master(req_saved.addr, 0, 0, 0);
+                    AMOOp::SC: assign_master(req_saved.addr, 1, req_saved.wdata, req_saved.wmask);
                     default  : {}
                 }
             } else {
-                assign_master(slave_saved.addr, slave_saved.wen, slave_saved.wdata, slave_saved.wmask);
+                assign_master(req_saved.addr, req_saved.wen, req_saved.wdata, req_saved.wmask);
             }
             State::WaitValid                         : accept_request_comb();
             State::SCSuccess, State::SCFail          : accept_request_comb();
-            State::AMOLoadReady                      : assign_master      (slave_saved.addr, 0, 0, 0);
+            State::AMOLoadReady                      : assign_master      (req_saved.addr, 0, 0, 0);
             State::AMOLoadValid, State::AMOStoreReady: {
                 let rdata        : UIntX = if state == State::AMOLoadValid ? master.rdata : zaamo_fetched_data;
-                let wdata        : UIntX = gen_amo_wdata(slave_saved, rdata);
-                assign_master(slave_saved.addr, 1, wdata, slave_saved.wmask);
+                let wdata        : UIntX = gen_amo_wdata(req_saved, rdata);
+                assign_master(req_saved.addr, 1, wdata, req_saved.wmask);
             }
             State::AMOStoreValid: accept_request_comb();
             default             : {}
@@ -176,37 +186,34 @@ module amounit (
     always_ff {
         if_reset {
             state              = State::Init;
-            slave_saved.valid  = 0;
-            slave_saved.addr   = 0;
-            slave_saved.wen    = 0;
-            slave_saved.wdata  = 0;
-            slave_saved.wmask  = 0;
-            slave_saved.is_amo = 0;
-            slave_saved.amoop  = 0 as AMOOp;
-            slave_saved.aq     = 0;
-            slave_saved.rl     = 0;
-            slave_saved.funct3 = 0;
+            req_saved          = Request'{
+                addr              : 0         ,
+                wen               : 0         ,
+                wdata             : 0         ,
+                wmask             : 0         ,
+                is_amo            : 0         ,
+                amoop             : 0 as AMOOp,
+                funct3            : 0         ,
+            };
             is_addr_reserved   = 0;
             reserved_addr      = 0;
             zaamo_fetched_data = 0;
         } else {
             case state {
-                State::Init, State::WaitValid, State::SCSuccess, State::SCFail: {
+                State::Init, State::WaitValid, State::SCSuccess, State::SCFail, State::AMOStoreValid: {
                     if (state == State::Init || (state == State::WaitValid && master.rvalid)
-                        || (state == State::SCSuccess || master.rvalid) || state == State::SCFail
+                        || (state == State::SCSuccess && master.rvalid) || state == State::SCFail
                         || (state == State::AMOStoreValid && master.rvalid)) {
-                        // accept_request_ff();
-                        slave_saved.valid = slave.ready && slave.valid;
                         if slave.ready && slave.valid {
-                            slave_saved.addr   = slave.addr;
-                            slave_saved.wen    = slave.wen;
-                            slave_saved.wdata  = slave.wdata;
-                            slave_saved.wmask  = slave.wmask;
-                            slave_saved.is_amo = slave.is_amo;
-                            slave_saved.amoop  = slave.amoop;
-                            slave_saved.aq     = slave.aq;
-                            slave_saved.rl     = slave.rl;
-                            slave_saved.funct3 = slave.funct3;
+                            req_saved = Request'{
+                                addr     : slave.addr                                                                          ,
+                                wen      : slave.wen                                                                           ,
+                                wdata    : slave.wdata                                                                         ,
+                                wmask    : slave.wmask                                                                         ,
+                                is_amo   : slave.is_amo                                                                        ,
+                                amoop    : slave.amoop                                                                         ,
+                                funct3   : slave.funct3                                                                        ,
+                            };
                             if slave.is_amo {
                                 case slave.amoop {
                                     AMOOp::LR: {
@@ -239,7 +246,7 @@ module amounit (
                     }
                 }
                 State::WaitReady: if master.ready {
-                    if slave_saved.is_amo && slave_saved.amoop == AMOOp::SC {
+                    if req_saved.is_amo && req_saved.amoop == AMOOp::SC {
                         state = State::SCSuccess;
                     } else {
                         state = State::WaitValid;
@@ -257,7 +264,7 @@ module amounit (
                 }
                 State::AMOLoadValid: if master.rvalid {
                     zaamo_fetched_data = master.rdata;
-                    state              = if slave.ready ? State::AMOStoreValid : State::AMOStoreReady;
+                    state              = if master.ready ? State::AMOStoreValid : State::AMOStoreReady;
                 }
                 State::AMOStoreReady: if master.ready {
                     state = State::AMOStoreValid;
