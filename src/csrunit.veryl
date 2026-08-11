@@ -96,8 +96,11 @@ module csrunit (
         default                                    : 0
     };
 
+    // Trap Return
+    assign trap_return = valid && is_mret && !raise_expt;
+
     // Trap
-    assign raise_trap = raise_expt || (valid && is_mret);
+    assign raise_trap = raise_expt || trap_return;
     let trap_cause: UIntX = expt_cause;
     assign trap_vector = if raise_expt ? mtvec : mepc;
 
