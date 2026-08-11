@@ -15,6 +15,10 @@ module amounit (
     var state: State;
     inst slave_saved: core_data_if;
 
+    // lr/sc
+    var is_addr_reserved: logic;
+    var reserved_addr   : Addr ;
+
     function reset_master () {
         master.valid = 0;
         master.addr  = 0;
@@ -40,7 +44,14 @@ module amounit (
     // Accept new request
     function accept_request_comb () {
         if slave.ready && slave.valid {
-            assign_master(slave.addr, slave.wen, slave.wdata, slave.wmask);
+            if slave.is_amo {
+                case slave.amoop {
+                    AMOOp::LR: assign_master(slave.addr, 0, 0, 0);
+                    default  : {}
+                }
+            } else {
+                assign_master(slave.addr, slave.wen, slave.wdata, slave.wmask);
+            }
         }
     }
 
@@ -68,7 +79,12 @@ module amounit (
         reset_master();
         case state {
             State::Init     : accept_request_comb();
-            State::WaitReady: {
+            State::WaitReady: if slave_saved.is_amo {
+                case slave_saved.amoop {
+                    AMOOp::LR: assign_master(slave_saved.addr, 0, 0, 0);
+                    default  : {}
+                }
+            } else {
                 assign_master(slave_saved.addr, slave_saved.wen, slave_saved.wdata, slave_saved.wmask);
             }
             State::WaitValid: accept_request_comb();
@@ -90,46 +106,44 @@ module amounit (
             slave_saved.aq     = 0;
             slave_saved.rl     = 0;
             slave_saved.funct3 = 0;
+            is_addr_reserved   = 0;
+            reserved_addr      = 0;
         } else {
             case state {
-                State::Init: {
-                    // accept_request_ff();
-                    slave_saved.valid = slave.ready && slave.valid;
-                    if slave.ready && slave.valid {
-                        slave_saved.addr   = slave.addr;
-                        slave_saved.wen    = slave.wen;
-                        slave_saved.wdata  = slave.wdata;
-                        slave_saved.wmask  = slave.wmask;
-                        slave_saved.is_amo = slave.is_amo;
-                        slave_saved.amoop  = slave.amoop;
-                        slave_saved.aq     = slave.aq;
-                        slave_saved.rl     = slave.rl;
-                        slave_saved.funct3 = slave.funct3;
-                        state              = if master.ready ? State::WaitValid : State::WaitReady;
-                    } else {
-                        state = State::Init;
+                State::Init, State::WaitValid: {
+                    if (state != State::WaitValid || master.rvalid) {
+                        // accept_request_ff();
+                        slave_saved.valid = slave.ready && slave.valid;
+                        if slave.ready && slave.valid {
+                            slave_saved.addr   = slave.addr;
+                            slave_saved.wen    = slave.wen;
+                            slave_saved.wdata  = slave.wdata;
+                            slave_saved.wmask  = slave.wmask;
+                            slave_saved.is_amo = slave.is_amo;
+                            slave_saved.amoop  = slave.amoop;
+                            slave_saved.aq     = slave.aq;
+                            slave_saved.rl     = slave.rl;
+                            slave_saved.funct3 = slave.funct3;
+                            if slave.is_amo {
+                                case slave.amoop {
+                                    AMOOp::LR: {
+                                        // reserve address
+                                        is_addr_reserved = 1;
+                                        reserved_addr    = slave.addr;
+                                        state            = if master.ready ? State::WaitValid : State::WaitReady;
+                                    }
+                                    default: {}
+                                }
+                            } else {
+                                state = if master.ready ? State::WaitValid : State::WaitReady;
+                            }
+                        } else {
+                            state = State::Init;
+                        }
                     }
                 }
                 State::WaitReady: {
                     state = State::WaitValid;
-                }
-                State::WaitValid: if master.rvalid {
-                    // accept_request_ff();
-                    slave_saved.valid = slave.ready && slave.valid;
-                    if slave.ready && slave.valid {
-                        slave_saved.addr   = slave.addr;
-                        slave_saved.wen    = slave.wen;
-                        slave_saved.wdata  = slave.wdata;
-                        slave_saved.wmask  = slave.wmask;
-                        slave_saved.is_amo = slave.is_amo;
-                        slave_saved.amoop  = slave.amoop;
-                        slave_saved.aq     = slave.aq;
-                        slave_saved.rl     = slave.rl;
-                        slave_saved.funct3 = slave.funct3;
-                        state              = if master.ready ? State::WaitValid : State::WaitReady;
-                    } else {
-                        state = State::Init;
-                    }
                 }
             }
         }
