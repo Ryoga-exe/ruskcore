@@ -61,6 +61,21 @@ zig build test -- add
 
 The test runner prints every PASS/FAIL result and writes the summary and per-test simulator output under `zig-out/test-results`.
 
+## CoreMark
+
+```sh
+zig build coremark
+```
+
+args:
+
+- `-Dcoremark-iterations`
+- `-Dcoremark-cycles`
+- `-Dcoremark-clock-hz`
+
+Add `-Dkonata` to generate `zig-out/coremark/coremark.log`. Tracing defaults
+to one iteration to keep the log size manageable.
+
 ## Konata
 
 Generate a [Konata](https://github.com/shioyadan/Konata) pipeline trace:

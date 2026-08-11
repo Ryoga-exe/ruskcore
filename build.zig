@@ -34,6 +34,7 @@ const FpgaConfig = struct {
 pub fn build(b: *std.Build) void {
     const riscv_tests = b.dependency("riscv_tests", .{});
     const riscv_test_env = b.dependency("riscv_test_env", .{});
+    const coremark = b.dependency("coremark", .{});
     const rom_path = b.option(
         []const u8,
         "rom",
@@ -45,11 +46,26 @@ pub fn build(b: *std.Build) void {
         "print-debug",
         "Enable verbose simulation debug output",
     ) orelse false;
-    const test_konata = b.option(
+    const enable_konata = b.option(
         bool,
         "konata",
-        "Generate a Konata pipeline trace for each RISC-V test",
+        "Generate Konata pipeline traces",
     ) orelse false;
+    const coremark_iterations = b.option(
+        u32,
+        "coremark-iterations",
+        "Number of CoreMark iterations",
+    ) orelse if (enable_konata) @as(u32, 1) else 200;
+    const coremark_cycles = b.option(
+        u64,
+        "coremark-cycles",
+        "Maximum CoreMark simulation cycles (0 for no limit)",
+    ) orelse if (enable_konata) @as(u64, 10_000_000) else 400_000_000;
+    const coremark_clock_hz = b.option(
+        u64,
+        "coremark-clock-hz",
+        "Clock frequency used to convert mcycle to seconds",
+    ) orelse 27_000_000;
 
     const veryl_fmt = b.addSystemCommand(&.{ "veryl", "fmt", "--quiet" });
     const fmt_step = b.step("fmt", "Format the Veryl sources");
@@ -251,8 +267,52 @@ pub fn build(b: *std.Build) void {
     const test_simulator = addSimulator(b, veryl_build, .{
         .test_mode = true,
         .print_debug = print_debug,
-        .enable_konata_trace = test_konata,
+        .enable_konata_trace = enable_konata,
     });
+    const coremark_artifacts = addCoreMark(
+        b,
+        bin2hex,
+        coremark,
+        coremark_iterations,
+        coremark_clock_hz,
+    );
+    const run_coremark = std.Build.Step.Run.create(b, "run CoreMark");
+    run_coremark.addFileArg(test_simulator);
+    run_coremark.addFileArg(rom);
+    run_coremark.addFileArg(coremark_artifacts.image);
+    run_coremark.addArg(b.fmt("{d}", .{coremark_cycles}));
+    const coremark_raw = if (enable_konata)
+        run_coremark.addOutputFileArg("coremark.trace")
+    else
+        null;
+    run_coremark.setEnvironmentVariable("DBG_ADDR", "0x40000000");
+    run_coremark.has_side_effects = true;
+    const install_coremark_elf = b.addInstallFile(
+        coremark_artifacts.elf,
+        "coremark/coremark.elf",
+    );
+    const install_coremark_image = b.addInstallFile(
+        coremark_artifacts.image,
+        "coremark/coremark.hex",
+    );
+    const coremark_step = b.step(
+        "coremark",
+        "Build and run CoreMark with Verilator",
+    );
+    coremark_step.dependOn(&run_coremark.step);
+    coremark_step.dependOn(&install_coremark_elf.step);
+    coremark_step.dependOn(&install_coremark_image.step);
+    if (coremark_raw) |raw| {
+        const convert_coremark = b.addRunArtifact(konata_converter);
+        convert_coremark.addFileArg(raw);
+        const coremark_log = convert_coremark.addOutputFileArg("coremark.log");
+        const install_coremark_log = b.addInstallFile(
+            coremark_log,
+            "coremark/coremark.log",
+        );
+        coremark_step.dependOn(&install_coremark_log.step);
+    }
+
     const test_runner = addHostTool(b, "test-runner", "tools/test_runner.zig");
     const test_cycles = b.option(
         u64,
@@ -272,7 +332,7 @@ pub fn build(b: *std.Build) void {
     run_tests.addArg(b.fmt("{d}", .{test_cycles}));
     run_tests.addDirectoryArg(test_images.getDirectory());
     run_tests.addArg(debug_label);
-    run_tests.addArg(if (test_konata) "1" else "0");
+    run_tests.addArg(if (enable_konata) "1" else "0");
     run_tests.has_side_effects = true;
     const build_tests_step = b.step("riscv-tests", "Build the RISC-V test images");
     const test_step = b.step("test", "Run the RISC-V tests with Verilator");
@@ -490,6 +550,68 @@ fn addDebugImage(
     convert.addArg("8");
     convert.addFileArg(binary.getOutput());
     return convert.captureStdOut(.{ .basename = b.fmt("{s}.hex", .{name}) });
+}
+
+fn addCoreMark(
+    b: *std.Build,
+    bin2hex: *std.Build.Step.Compile,
+    coremark: *std.Build.Dependency,
+    iterations: u32,
+    clock_hz: u64,
+) RiscvTestArtifacts {
+    const riscv = std.Target.riscv;
+    const target = b.resolveTargetQuery(.{
+        .cpu_arch = .riscv64,
+        .cpu_model = .{ .explicit = &riscv.cpu.generic_rv64 },
+        .cpu_features_add = riscv.featureSet(&.{.m}),
+        .os_tag = .freestanding,
+        .abi = .none,
+    });
+    const module = b.createModule(.{
+        .root_source_file = null,
+        .target = target,
+        .optimize = .ReleaseFast,
+        .code_model = .medany,
+    });
+    module.addAssemblyFile(b.path("test/entry.S"));
+    for ([_][]const u8{
+        "core_list_join.c",
+        "core_main.c",
+        "core_matrix.c",
+        "core_state.c",
+        "core_util.c",
+    }) |source| {
+        module.addCSourceFile(.{
+            .file = coremark.path(source),
+            .flags = &.{ "-std=c11", "-ffreestanding", "-fno-builtin" },
+        });
+    }
+    module.addCSourceFile(.{
+        .file = b.path("test/coremark/core_portme.c"),
+        .flags = &.{ "-std=c11", "-ffreestanding", "-fno-builtin" },
+    });
+    module.addIncludePath(b.path("test/coremark"));
+    module.addIncludePath(coremark.path(""));
+    module.addCMacro("ITERATIONS", b.fmt("{d}", .{iterations}));
+    module.addCMacro("COREMARK_CLOCK_HZ", b.fmt("{d}", .{clock_hz}));
+
+    const elf = b.addExecutable(.{
+        .name = "coremark",
+        .root_module = module,
+    });
+    elf.setLinkerScript(b.path("test/coremark/link.ld"));
+
+    const binary = elf.addObjCopy(.{
+        .basename = "coremark.bin",
+        .format = .bin,
+    });
+    const convert = b.addRunArtifact(bin2hex);
+    convert.addArg("8");
+    convert.addFileArg(binary.getOutput());
+    return .{
+        .elf = elf.getEmittedBin(),
+        .image = convert.captureStdOut(.{ .basename = "coremark.hex" }),
+    };
 }
 
 fn parseTestSuite(name: []const u8) ?TestSuite {
