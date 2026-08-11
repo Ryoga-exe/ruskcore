@@ -410,6 +410,7 @@ fn addRiscvTest(
         } },
         .cpu_features_add = riscv.featureSet(&[_]riscv.Feature{
             .m,
+            .a,
         }),
         .os_tag = .freestanding,
         .abi = .none,
