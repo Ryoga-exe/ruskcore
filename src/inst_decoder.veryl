@@ -20,9 +20,17 @@ module inst_decoder (
     let imm_u: UIntX = {bits[31] repeat XLEN - $bits(imm_u_g) - 12, imm_u_g, 12'b0};
     let imm_j: UIntX = {bits[31] repeat XLEN - $bits(imm_j_g) - 1, imm_j_g, 1'b0};
 
-    let op: logic<7> = bits[6:0];
-    let f7: logic<7> = bits[31:25];
-    let f3: logic<3> = bits[14:12];
+    let op   : logic<7> = bits[6:0];
+    let f7   : logic<7> = bits[31:25];
+    let f3   : logic<3> = bits[14:12];
+    let amoop: AMOOp    = bits[31:27] as AMOOp;
+
+    let amo_valid: logic = case amoop {
+        AMOOp::LR: bits[24:20] == 0,
+        AMOOp::SC, AMOOp::SWAP, AMOOp::ADD, AMOOp::XOR, AMOOp::AND, AMOOp::OR, AMOOp::MIN, AMOOp::MAX, AMOOp::MINU,
+        AMOOp::MAXU: 1,
+        default: 0,
+    };
 
     const T: logic = 1'b1; // true
     const F: logic = 1'b0; // false
@@ -64,7 +72,7 @@ module inst_decoder (
                 || // EBREAK
                  bits == 32'h30200073, //MRET
             OP_MISC_MEM: T, // FENCE
-            OP_AMO     : f3 == 3'b010 || f3 == 3'b011, // AMO
+            OP_AMO     : (f3 == 3'b010 || f3 == 3'b011) && amo_valid, // AMO
             default    : F,
         };
 
