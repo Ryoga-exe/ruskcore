@@ -49,4 +49,11 @@ package pipeline {
         counter_wdata: UInt64  ,
         raise_trap   : logic   ,
     }
+
+    // Forwarding
+    struct forwarding {
+        valid: logic   ,
+        addr : logic<5>,
+        data : UIntX   ,
+    }
 }

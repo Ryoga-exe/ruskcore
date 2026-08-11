@@ -190,13 +190,22 @@ module core (
     let exs_rs2_addr: logic<5> = exs_inst_bits[24:20];
 
     // source register data
-    let exs_rs1_data: UIntX = if exs_rs1_addr == 0 ? 0 : regfile[exs_rs1_addr];
-    let exs_rs2_data: UIntX = if exs_rs2_addr == 0 ? 0 : regfile[exs_rs2_addr];
+    var wb_forward: forwarding;
+
+    let exs_rs1_data: UIntX = switch {
+        exs_rs1_addr == 0                                  : 0,
+        wb_forward.valid && wb_forward.addr == exs_rs1_addr: wb_forward.data,
+        default                                            : regfile[exs_rs1_addr],
+    };
+    let exs_rs2_data: UIntX = switch {
+        exs_rs2_addr == 0                                  : 0,
+        wb_forward.valid && wb_forward.addr == exs_rs2_addr: wb_forward.data,
+        default                                            : regfile[exs_rs2_addr],
+    };
 
     // Data Hazerd
     var exs_mem_data_hazard: logic;
-    var exs_wb_data_hazard : logic;
-    let exs_data_hazard    : logic = exs_mem_data_hazard || exs_wb_data_hazard;
+    let exs_data_hazard    : logic = exs_mem_data_hazard;
 
     // ALU
     var exs_op1       : UIntX;
@@ -474,9 +483,12 @@ module core (
         }
     }
 
-    // Hazard
-    assign exs_wb_data_hazard = wbs_valid && wbs_ctrl.rwb_en
-        && (wbs_rd_addr == exs_rs1_addr || wbs_rd_addr == exs_rs2_addr);
+    // Register Forwarding (WB -> EX)
+    assign wb_forward = forwarding'{
+        valid: wbs_valid && wbs_ctrl.rwb_en && !wbq_rdata.raise_trap && wbs_rd_addr != 0,
+        addr : wbs_rd_addr                                                              ,
+        data : wbs_wb_data                                                              ,
+    };
 
     always_comb {
         // WB -> END
