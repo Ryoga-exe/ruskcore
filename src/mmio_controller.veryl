@@ -43,7 +43,7 @@ module mmio_controller (
 
     // reset master with 0
     function reset_membus_master (
-        master: modport Membus::master_output,
+        master: modport Membus::master,
     ) {
         master.valid = 0;
         master.addr  = 0;
@@ -107,9 +107,10 @@ module mmio_controller (
 
     // Assign device rvalid and rdata to req
     function assign_device_slave (
-        device: input   Device          ,
-        req   : modport Membus::response,
+        device: input   Device       ,
+        req   : modport Membus::slave,
     ) {
+        req.ready  = get_device_rvalid(device);
         req.rvalid = 1;
         req.rdata  = 0;
         case device {
@@ -164,7 +165,6 @@ module mmio_controller (
             if is_requested {
                 // return result
                 assign_device_slave(last_device, req_core);
-                req_core.ready      = get_device_rvalid(last_device);
             }
         } else {
             req_core.ready = 1;
