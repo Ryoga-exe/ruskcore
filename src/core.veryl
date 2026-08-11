@@ -324,7 +324,7 @@ module core (
                 default: 1'b0,
             };
         memq_wdata.expt = exq_rdata.expt;
-        if !memq_rdata.expt.valid {
+        if !exq_rdata.expt.valid {
             if instruction_address_misaligned {
                 memq_wdata.expt.valid = 1;
                 memq_wdata.expt.cause = CsrCause::INSTRUCTION_ADDRESS_MISALIGNED;
