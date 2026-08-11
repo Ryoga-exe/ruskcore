@@ -3,21 +3,26 @@ import corectrl::*;
 
 /// CSR module
 module csrunit (
-    clk        : input  clock            ,
-    rst        : input  reset            ,
-    valid      : input  logic            , /// Whether a command/instruction is being supplied
-    pc         : input  Addr             , /// Current Instruction Address
-    inst_bits  : input  Inst             , /// Bits representing current instruction
-    ctrl       : input  InstCtrl         , /// The instruction's `InstCtrl`
-    expt_info  : input  ExceptionInfo    , /// Exception Info
-    rd_addr    : input  logic        <5> , /// Current instruction's rd number
-    csr_addr   : input  logic        <12>, /// CSR address specified by the instruction (upper 12 bits of the instruction)
-    rs1_addr   : input  logic        <5> , /// Current instruction's `rs1` field
-    rs1_data   : input  UIntX            , /// CUrrent instruction's `rs1` address
-    rdata      : output UIntX            , /// Result of reading the CSR by the CSR instruction
-    raise_trap : output logic            , /// 1 when raise trap
-    trap_vector: output Addr             , /// Address to jump to when an exception occurs
-    led        : output UIntX            , /// LED
+    clk          : input  clock            ,
+    rst          : input  reset            ,
+    valid        : input  logic            , /// Whether a command/instruction is being supplied
+    pc           : input  Addr             , /// Current Instruction Address
+    inst_bits    : input  Inst             , /// Bits representing current instruction
+    ctrl         : input  InstCtrl         , /// The instruction's `InstCtrl`
+    expt_info    : input  ExceptionInfo    , /// Exception Info
+    rd_addr      : input  logic        <5> , /// Current instruction's rd number
+    csr_addr     : input  logic        <12>, /// CSR address specified by the instruction (upper 12 bits of the instruction)
+    rs1_addr     : input  logic        <5> , /// Current instruction's `rs1` field
+    rs1_data     : input  UIntX            , /// CUrrent instruction's `rs1` address
+    rdata        : output UIntX            , /// Result of reading the CSR by the CSR instruction
+    raise_trap   : output logic            , /// 1 when raise trap
+    trap_vector  : output Addr             , /// Address to jump to when an exception occurs
+    trap_return  : output logic            , /// Is this an instruction to return from a trap?
+    mcycle       : input  UInt64           , /// mcycle value
+    minstret     : input  UInt64           , /// minstret value
+    counter_write: output logic            , /// Write mcycle or minstret when the instruction retires
+    counter_wdata: output UInt64           , /// New counter value
+    led          : output UIntX            , /// LED
 ) {
     // CSRR(W|S|C)[I] inst?
     let is_wsc: logic = ctrl.is_csr && ctrl.funct3[1:0] != 0;
@@ -53,26 +58,29 @@ module csrunit (
     always_comb {
         // read
         rdata = case csr_addr {
-            CsrAddr::MISA   : misa,
-            CsrAddr::MIMPID : MACHINE_IMPLEMENTATION_ID,
-            CsrAddr::MHARTID: mhartid,
-            CsrAddr::MSTATUS: mstatus,
-            CsrAddr::MTVEC  : mtvec,
-            CsrAddr::MEPC   : mepc,
-            CsrAddr::MCAUSE : mcause,
-            CsrAddr::MTVAL  : mtval,
-            CsrAddr::LED    : led,
-            default         : 'x,
+            CsrAddr::MISA    : misa,
+            CsrAddr::MIMPID  : MACHINE_IMPLEMENTATION_ID,
+            CsrAddr::MHARTID : mhartid,
+            CsrAddr::MSTATUS : mstatus,
+            CsrAddr::MTVEC   : mtvec,
+            CsrAddr::MEPC    : mepc,
+            CsrAddr::MCAUSE  : mcause,
+            CsrAddr::MTVAL   : mtval,
+            CsrAddr::MCYCLE  : mcycle,
+            CsrAddr::MINSTRET: minstret,
+            CsrAddr::LED     : led,
+            default          : 'x,
         };
         // write
         wmask = case csr_addr {
-            CsrAddr::MSTATUS: MSTATUS_WMASK,
-            CsrAddr::MTVEC  : MTVEC_WMASK,
-            CsrAddr::MEPC   : MEPC_WMASK,
-            CsrAddr::MCAUSE : MCAUSE_WMASK,
-            CsrAddr::MTVAL  : MTVAL_WMASK,
-            CsrAddr::LED    : LED_WMASK,
-            default         : 0,
+            CsrAddr::MSTATUS                  : MSTATUS_WMASK,
+            CsrAddr::MTVEC                    : MTVEC_WMASK,
+            CsrAddr::MEPC                     : MEPC_WMASK,
+            CsrAddr::MCAUSE                   : MCAUSE_WMASK,
+            CsrAddr::MTVAL                    : MTVAL_WMASK,
+            CsrAddr::MCYCLE, CsrAddr::MINSTRET: '1,
+            CsrAddr::LED                      : LED_WMASK,
+            default                           : 0,
         };
         let wsource: UIntX = if ctrl.funct3[2] ? {1'b0 repeat XLEN - 5, rs1_addr} : rs1_data;
         wdata   = case ctrl.funct3[1:0] {
@@ -101,6 +109,12 @@ module csrunit (
 
     // Trap
     assign raise_trap = raise_expt || trap_return;
+
+    // Hardware performance counter write
+    assign counter_write = valid && is_wsc && !will_not_write_csr && !raise_expt
+        && (csr_addr == CsrAddr::MCYCLE || csr_addr == CsrAddr::MINSTRET);
+    assign counter_wdata = wdata;
+
     let trap_cause: UIntX = expt_cause;
     assign trap_vector = if raise_expt ? mtvec : mepc;
 
