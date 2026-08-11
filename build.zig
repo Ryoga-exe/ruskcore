@@ -46,21 +46,21 @@ pub fn build(b: *std.Build) void {
         "print-debug",
         "Enable verbose simulation debug output",
     ) orelse false;
-    const test_konata = b.option(
+    const enable_konata = b.option(
         bool,
         "konata",
-        "Generate a Konata pipeline trace for each RISC-V test",
+        "Generate Konata pipeline traces",
     ) orelse false;
     const coremark_iterations = b.option(
         u32,
         "coremark-iterations",
         "Number of CoreMark iterations",
-    ) orelse 200;
+    ) orelse if (enable_konata) @as(u32, 1) else 200;
     const coremark_cycles = b.option(
         u64,
         "coremark-cycles",
         "Maximum CoreMark simulation cycles (0 for no limit)",
-    ) orelse 400_000_000;
+    ) orelse if (enable_konata) @as(u64, 10_000_000) else 400_000_000;
     const coremark_clock_hz = b.option(
         u64,
         "coremark-clock-hz",
@@ -267,15 +267,8 @@ pub fn build(b: *std.Build) void {
     const test_simulator = addSimulator(b, veryl_build, .{
         .test_mode = true,
         .print_debug = print_debug,
-        .enable_konata_trace = test_konata,
+        .enable_konata_trace = enable_konata,
     });
-    const coremark_simulator = if (test_konata)
-        addSimulator(b, veryl_build, .{
-            .test_mode = true,
-            .print_debug = print_debug,
-        })
-    else
-        test_simulator;
     const coremark_artifacts = addCoreMark(
         b,
         bin2hex,
@@ -284,10 +277,14 @@ pub fn build(b: *std.Build) void {
         coremark_clock_hz,
     );
     const run_coremark = std.Build.Step.Run.create(b, "run CoreMark");
-    run_coremark.addFileArg(coremark_simulator);
+    run_coremark.addFileArg(test_simulator);
     run_coremark.addFileArg(rom);
     run_coremark.addFileArg(coremark_artifacts.image);
     run_coremark.addArg(b.fmt("{d}", .{coremark_cycles}));
+    const coremark_raw = if (enable_konata)
+        run_coremark.addOutputFileArg("coremark.trace")
+    else
+        null;
     run_coremark.setEnvironmentVariable("DBG_ADDR", "0x40000000");
     run_coremark.has_side_effects = true;
     const install_coremark_elf = b.addInstallFile(
@@ -305,6 +302,16 @@ pub fn build(b: *std.Build) void {
     coremark_step.dependOn(&run_coremark.step);
     coremark_step.dependOn(&install_coremark_elf.step);
     coremark_step.dependOn(&install_coremark_image.step);
+    if (coremark_raw) |raw| {
+        const convert_coremark = b.addRunArtifact(konata_converter);
+        convert_coremark.addFileArg(raw);
+        const coremark_log = convert_coremark.addOutputFileArg("coremark.log");
+        const install_coremark_log = b.addInstallFile(
+            coremark_log,
+            "coremark/coremark.log",
+        );
+        coremark_step.dependOn(&install_coremark_log.step);
+    }
 
     const test_runner = addHostTool(b, "test-runner", "tools/test_runner.zig");
     const test_cycles = b.option(
@@ -325,7 +332,7 @@ pub fn build(b: *std.Build) void {
     run_tests.addArg(b.fmt("{d}", .{test_cycles}));
     run_tests.addDirectoryArg(test_images.getDirectory());
     run_tests.addArg(debug_label);
-    run_tests.addArg(if (test_konata) "1" else "0");
+    run_tests.addArg(if (enable_konata) "1" else "0");
     run_tests.has_side_effects = true;
     const build_tests_step = b.step("riscv-tests", "Build the RISC-V test images");
     const test_step = b.step("test", "Run the RISC-V tests with Verilator");
