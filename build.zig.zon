@@ -12,6 +12,10 @@
             .url = "git+https://github.com/riscv/riscv-test-env#a1c373ec89a3500630bafabf406108a8fc568bcc",
             .hash = "N-V-__8AAC52AwAlv3zepDJ0cZJ23s6G3VQbdfxvDdK9VA6U",
         },
+        .coremark = .{
+            .url = "git+https://github.com/eembc/coremark#1f483d5b8316753a742cbf5590caf5bd0a4e4777",
+            .hash = "N-V-__8AAINbDwB9vySRvpZtUY9Zwo-bMYq2NZDR47zMxjjX",
+        },
     },
     .paths = .{
         "build.zig",
