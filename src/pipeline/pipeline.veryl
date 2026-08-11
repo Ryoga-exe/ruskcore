@@ -38,13 +38,15 @@ package pipeline {
 
     // MEM -> WB
     struct wbq_type {
-        addr      : Addr    ,
-        bits      : Inst    ,
-        ctrl      : InstCtrl,
-        imm       : UIntX   ,
-        alu_result: UIntX   ,
-        mem_rdata : UIntX   ,
-        csr_rdata : UIntX   ,
-        raise_trap: logic   ,
+        addr         : Addr    ,
+        bits         : Inst    ,
+        ctrl         : InstCtrl,
+        imm          : UIntX   ,
+        alu_result   : UIntX   ,
+        mem_rdata    : UIntX   ,
+        csr_rdata    : UIntX   ,
+        counter_write: logic   ,
+        counter_wdata: UInt64  ,
+        raise_trap   : logic   ,
     }
 }
