@@ -5,12 +5,12 @@
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .riscv_tests = .{
-            .url = "https://github.com/riscv-software-src/riscv-tests/archive/34e6b6d1e7936b526075432fb730d89148623484.tar.gz",
-            .hash = "N-V-__8AABQQLABN-BQlwahtNuverDFlkiHODGHAiMDpFB4n",
+            .url = "git+https://github.com/riscv-software-src/riscv-tests#447a5fcb8253627ddb5f6a226f64e43463afcdd5",
+            .hash = "N-V-__8AAIMeLABJG4RdIScf61QxOUlC11H898ycWdawGBzX",
         },
         .riscv_test_env = .{
-            .url = "https://github.com/riscv/riscv-test-env/archive/6de71edb142be36319e380ce782c3d1830c65d68.tar.gz",
-            .hash = "N-V-__8AACh1AwCRWACZ8TjTQ8QD-PCjZZBRjno5ld4ZZ8og",
+            .url = "git+https://github.com/riscv/riscv-test-env#a1c373ec89a3500630bafabf406108a8fc568bcc",
+            .hash = "N-V-__8AAC52AwAlv3zepDJ0cZJ23s6G3VQbdfxvDdK9VA6U",
         },
     },
     .paths = .{
