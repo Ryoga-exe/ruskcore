@@ -1,7 +1,7 @@
 import eei::*;
 
 module top_tang #(
-    param RESET_ACTIVE_HIGH: bit = 0,
+    param RESET_ACTIVE_HIGH: bit = 1,
 ) (
     clk: input  clock   ,
     rst: input  logic   ,
@@ -18,6 +18,8 @@ module top_tang #(
     inst t: top #(
         RAM_FILEPATH_IS_ENV: 0                     ,
         RAM_FILEPATH       : "test/led_counter.hex",
+        ROM_FILEPATH_IS_ENV: 0                     ,
+        ROM_FILEPATH       : "bootrom.hex"         ,
     ) (
         #[ifdef(TEST_MODE)]
         test_success : _       ,

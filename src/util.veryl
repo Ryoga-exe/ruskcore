@@ -50,6 +50,7 @@ package util {
         return filepath;
     }
 
+    #[ifdef(SIMULATION)]
     function get_input () -> u64 {
         return $sv::svutil::get_input();
     }

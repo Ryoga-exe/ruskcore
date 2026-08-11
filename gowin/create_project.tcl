@@ -29,6 +29,15 @@ close $fp
 add_file $cst
 add_file $sdc
 
+set init_dir [file join $project_dir "target"]
+foreach relpath {bootrom.hex test/led_counter.hex} {
+    set init_src [file join $project_dir $relpath]
+    set init_dst [file join $init_dir $relpath]
+
+    file mkdir [file dirname $init_dst]
+    file copy -force $init_src $init_dst
+}
+
 set_option -verilog_std sysv2017
 set_option -top_module ruskcore_top_tang
 set_option -output_base_name ruskcore
