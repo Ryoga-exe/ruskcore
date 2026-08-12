@@ -14,11 +14,12 @@ package pipeline {
 
     // ID -> EX
     struct exq_type {
-        addr: Addr         ,
-        bits: Inst         ,
-        ctrl: InstCtrl     ,
-        imm : UIntX        ,
-        expt: ExceptionInfo,
+        addr           : Addr         ,
+        bits           : Inst         ,
+        ctrl           : InstCtrl     ,
+        imm            : UIntX        ,
+        expt           : ExceptionInfo,
+        predicted_taken: logic        ,
     }
 
     // EX -> MEM
