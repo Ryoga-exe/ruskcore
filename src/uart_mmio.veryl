@@ -11,6 +11,9 @@ module uart_mmio #(
     txd   : output  logic        ,
     membus: modport Membus::slave,
 ) {
+    const REG_RBR_THR: logic<12> = 12'h000;
+    const REG_LSR    : logic<12> = 12'h005;
+
     var rx_data      : logic<8>;
     var rx_data_valid: logic   ;
     var rx_data_ready: logic   ;
@@ -44,6 +47,7 @@ module uart_mmio #(
     );
 
     // RX FIFO: UART -> MMIO
+    // read by MMIO RBR
     var rx_fifo_rdata : logic<8>;
     var rx_fifo_rvalid: logic   ;
     var rx_fifo_rready: logic   ;
@@ -65,6 +69,7 @@ module uart_mmio #(
     );
 
     // TX FIFO: MMIO -> UART
+    // written by MMIO THR
     var tx_fifo_wdata : logic<8>;
     var tx_fifo_wvalid: logic   ;
     var tx_fifo_wready: logic   ;
@@ -85,10 +90,22 @@ module uart_mmio #(
         rdata     : tx_data       ,
     );
 
-    // TODO: MMIO register logicで置き換える
-    assign rx_fifo_rready = 0;
-    assign tx_fifo_wvalid = 0;
-    assign tx_fifo_wdata  = 0;
-
     // Membus request/response
+
+    // RX FIFO pop
+    always_comb {
+        rx_fifo_rready = 0;
+        if membus.valid && !membus.wen {
+            rx_fifo_rready = 1;
+        }
+    }
+
+    always_comb {}
+
+    always_ff {
+        if_reset {
+            tx_fifo_wvalid = 0;
+            tx_fifo_wdata  = 0;
+        } else {}
+    }
 }
