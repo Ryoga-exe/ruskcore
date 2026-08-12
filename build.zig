@@ -208,6 +208,14 @@ pub fn build(b: *std.Build) void {
     const bin2hex_step = b.step("bin2hex", "Convert a binary file to a hex memory image");
     bin2hex_step.dependOn(&run_bin2hex.step);
 
+    const gpu_image = addZigImage(b, bin2hex, "gpu");
+    const install_gpu_image = b.addInstallFile(gpu_image, "test/zig/gpu.hex");
+    const update_gpu_image = b.addUpdateSourceFiles();
+    update_gpu_image.addCopyFileToSource(gpu_image, "test/zig/gpu.hex");
+    const gpu_image_step = b.step("gpu-image", "Build the graphics MMIO demo RAM image");
+    gpu_image_step.dependOn(&install_gpu_image.step);
+    gpu_image_step.dependOn(&update_gpu_image.step);
+
     const debug_output_image = addDebugImage(b, bin2hex, "debug_output");
     const install_debug_output_image = b.addInstallFile(
         debug_output_image,
@@ -540,6 +548,44 @@ fn addDebugImage(
         .name = name,
         .root_module = module,
     });
+    elf.setLinkerScript(b.path("test/link.ld"));
+
+    const binary = elf.addObjCopy(.{
+        .basename = b.fmt("{s}.bin", .{name}),
+        .format = .bin,
+    });
+    const convert = b.addRunArtifact(bin2hex);
+    convert.addArg("8");
+    convert.addFileArg(binary.getOutput());
+    return convert.captureStdOut(.{ .basename = b.fmt("{s}.hex", .{name}) });
+}
+
+fn addZigImage(
+    b: *std.Build,
+    bin2hex: *std.Build.Step.Compile,
+    name: []const u8,
+) std.Build.LazyPath {
+    const riscv = std.Target.riscv;
+    const target = b.resolveTargetQuery(.{
+        .cpu_arch = .riscv64,
+        .cpu_model = .{ .explicit = &riscv.cpu.generic_rv64 },
+        .cpu_features_add = riscv.featureSet(&.{.m}),
+        .os_tag = .freestanding,
+        .abi = .none,
+    });
+    const module = b.createModule(.{
+        .root_source_file = b.path(b.fmt("test/zig/{s}.zig", .{name})),
+        .target = target,
+        .optimize = .ReleaseSmall,
+        .code_model = .medany,
+    });
+    module.addAssemblyFile(b.path("test/entry.S"));
+
+    const elf = b.addExecutable(.{
+        .name = name,
+        .root_module = module,
+    });
+    elf.entry = .{ .symbol_name = "_start" };
     elf.setLinkerScript(b.path("test/link.ld"));
 
     const binary = elf.addObjCopy(.{
