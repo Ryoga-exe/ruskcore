@@ -1,0 +1,13 @@
+import eei::*;
+
+// branch predictor
+// bimodal
+module bpunit (
+    clk: input clock,
+    rst: input reset,
+    pc : input Addr ,
+) {
+    const HISTORY_WIDTH: u32 = 8;
+
+    var pht: logic<2> [2 ** HISTORY_WIDTH];
+}
