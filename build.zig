@@ -216,6 +216,22 @@ pub fn build(b: *std.Build) void {
     gpu_image_step.dependOn(&install_gpu_image.step);
     gpu_image_step.dependOn(&update_gpu_image.step);
 
+    const uart_image = addZigImageWithLinker(
+        b,
+        bin2hex,
+        "uart_image",
+        "test/zig/uart_image.ld",
+    );
+    const install_uart_image = b.addInstallFile(uart_image, "test/zig/uart_image.hex");
+    const update_uart_image = b.addUpdateSourceFiles();
+    update_uart_image.addCopyFileToSource(uart_image, "test/zig/uart_image.hex");
+    const uart_image_step = b.step(
+        "uart-image",
+        "Build the UART graphics receiver RAM image",
+    );
+    uart_image_step.dependOn(&install_uart_image.step);
+    uart_image_step.dependOn(&update_uart_image.step);
+
     const debug_output_image = addDebugImage(b, bin2hex, "debug_output");
     const install_debug_output_image = b.addInstallFile(
         debug_output_image,
@@ -565,6 +581,15 @@ fn addZigImage(
     bin2hex: *std.Build.Step.Compile,
     name: []const u8,
 ) std.Build.LazyPath {
+    return addZigImageWithLinker(b, bin2hex, name, "test/link.ld");
+}
+
+fn addZigImageWithLinker(
+    b: *std.Build,
+    bin2hex: *std.Build.Step.Compile,
+    name: []const u8,
+    linker_script: []const u8,
+) std.Build.LazyPath {
     const riscv = std.Target.riscv;
     const target = b.resolveTargetQuery(.{
         .cpu_arch = .riscv64,
@@ -586,7 +611,7 @@ fn addZigImage(
         .root_module = module,
     });
     elf.entry = .{ .symbol_name = "_start" };
-    elf.setLinkerScript(b.path("test/link.ld"));
+    elf.setLinkerScript(b.path(linker_script));
 
     const binary = elf.addObjCopy(.{
         .basename = b.fmt("{s}.bin", .{name}),
