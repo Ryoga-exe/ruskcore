@@ -12,6 +12,9 @@ package pipeline {
         bits            : Inst ,
         predicted_taken : logic,
         predicted_target: Addr ,
+        lane1_valid     : logic,
+        lane1_addr      : Addr ,
+        lane1_bits      : Inst ,
     }
 
     // ID -> EX
@@ -23,35 +26,52 @@ package pipeline {
         expt            : ExceptionInfo,
         predicted_taken : logic        ,
         predicted_target: Addr         ,
+        lane1_valid     : logic        ,
+        lane1_addr      : Addr         ,
+        lane1_bits      : Inst         ,
+        lane1_ctrl      : InstCtrl     ,
+        lane1_imm       : UIntX        ,
     }
 
     // EX -> MEM
     struct memq_type {
-        addr      : Addr            ,
-        bits      : Inst            ,
-        ctrl      : InstCtrl        ,
-        imm       : UIntX           ,
-        expt      : ExceptionInfo   ,
-        alu_result: UIntX           ,
-        rs1_addr  : logic        <5>,
-        rs1_data  : UIntX           ,
-        rs2_data  : UIntX           ,
-        br_taken  : logic           ,
-        jump_addr : Addr            ,
+        addr            : Addr            ,
+        bits            : Inst            ,
+        ctrl            : InstCtrl        ,
+        imm             : UIntX           ,
+        expt            : ExceptionInfo   ,
+        alu_result      : UIntX           ,
+        rs1_addr        : logic        <5>,
+        rs1_data        : UIntX           ,
+        rs2_data        : UIntX           ,
+        br_taken        : logic           ,
+        jump_addr       : Addr            ,
+        lane1_valid     : logic           ,
+        lane1_addr      : Addr            ,
+        lane1_bits      : Inst            ,
+        lane1_ctrl      : InstCtrl        ,
+        lane1_imm       : UIntX           ,
+        lane1_alu_result: UIntX           ,
     }
 
     // MEM -> WB
     struct wbq_type {
-        addr         : Addr    ,
-        bits         : Inst    ,
-        ctrl         : InstCtrl,
-        imm          : UIntX   ,
-        alu_result   : UIntX   ,
-        mem_rdata    : UIntX   ,
-        csr_rdata    : UIntX   ,
-        counter_write: logic   ,
-        counter_wdata: UInt64  ,
-        raise_trap   : logic   ,
+        addr            : Addr    ,
+        bits            : Inst    ,
+        ctrl            : InstCtrl,
+        imm             : UIntX   ,
+        alu_result      : UIntX   ,
+        mem_rdata       : UIntX   ,
+        csr_rdata       : UIntX   ,
+        counter_write   : logic   ,
+        counter_wdata   : UInt64  ,
+        raise_trap      : logic   ,
+        lane1_valid     : logic   ,
+        lane1_addr      : Addr    ,
+        lane1_bits      : Inst    ,
+        lane1_ctrl      : InstCtrl,
+        lane1_imm       : UIntX   ,
+        lane1_alu_result: UIntX   ,
     }
 
     // Forwarding

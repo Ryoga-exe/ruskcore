@@ -3,11 +3,11 @@ import corectrl::*;
 import pipeline::*;
 
 module core (
-    clk     : input   clock                          ,
-    rst     : input   reset                          ,
-    i_membus: modport membus_if::<ILEN, XLEN>::master,
-    d_membus: modport core_data_if::master           ,
-    led     : output  UIntX                          ,
+    clk     : input   clock                                       ,
+    rst     : input   reset                                       ,
+    i_membus: modport membus_if::<MEMBUS_DATA_WIDTH, XLEN>::master,
+    d_membus: modport core_data_if::master                        ,
+    led     : output  UIntX                                       ,
 ) {
     // IF -> ID
     var if_fifo_wready    : logic       ;
@@ -44,12 +44,18 @@ module core (
 
     #[ifdef(KONATA_TRACE)]
     {
-        var trace_next_id : u64;
-        var if_trace_wdata: u64;
-        var id_trace_id   : u64;
-        var ex_trace_id   : u64;
-        var mem_trace_id  : u64;
-        var wb_trace_id   : u64;
+        var trace_next_id        : u64;
+        var if_trace_wdata       : u64;
+        var if_lane1_trace_wdata : u64;
+        var id_trace_id          : u64;
+        var id_lane1_trace_id    : u64;
+        var ids_deferred_trace_id: u64;
+        var ex_trace_id          : u64;
+        var ex_lane1_trace_id    : u64;
+        var mem_trace_id         : u64;
+        var mem_lane1_trace_id   : u64;
+        var wb_trace_id          : u64;
+        var wb_lane1_trace_id    : u64;
     }
 
     // ====================================================
@@ -60,7 +66,7 @@ module core (
     var if_pc_requested              : Addr ; // 要求アドレス
     var if_predicted_taken_requested : logic;
     var if_predicted_target_requested: Addr ;
-    let if_pc_next                   : Addr  = if_pc + 4;
+    let if_pc_next                   : Addr  = if if_pc[2] == 0 ? if_pc + 8 : if_pc + 4;
 
     var if_predict_taken    : logic;
     var if_predict_target   : Addr ;
@@ -80,7 +86,7 @@ module core (
     always_comb {
         // FIFO に 2 個以上空きがあるとき fetch
         i_membus.valid = if_fifo_wready_two;
-        i_membus.addr  = if_pc;
+        i_membus.addr  = {if_pc[XLEN - 1:3], 3'b000};
         i_membus.wen   = 0;
         i_membus.wdata = 'x; // no use
         i_membus.wmask = 0;
@@ -128,7 +134,8 @@ module core (
             if_fifo_wdata  = 0;
             #[ifdef(KONATA_TRACE)]
             block {
-                if_trace_wdata = 0;
+                if_trace_wdata       = 0;
+                if_lane1_trace_wdata = 0;
             }
         } else {
             if fetch_redirect {
@@ -137,12 +144,20 @@ module core (
                 if if_is_requested && i_membus.rvalid {
                     if_fifo_wvalid                 = 1;
                     if_fifo_wdata.addr             = if_pc_requested;
-                    if_fifo_wdata.bits             = i_membus.rdata;
+                    if_fifo_wdata.bits             = if if_pc_requested[2] == 0 ?
+                        i_membus.rdata[31:0]
+                    :
+                        i_membus.rdata[63:32]
+                    ;
                     if_fifo_wdata.predicted_taken  = if_predicted_taken_requested;
                     if_fifo_wdata.predicted_target = if_predicted_target_requested;
+                    if_fifo_wdata.lane1_valid      = !if_predicted_taken_requested && if_pc_requested[2] == 0;
+                    if_fifo_wdata.lane1_addr       = if_pc_requested + 4;
+                    if_fifo_wdata.lane1_bits       = i_membus.rdata[63:32];
                     #[ifdef(KONATA_TRACE)]
                     block {
-                        if_trace_wdata = trace_next_id;
+                        if_trace_wdata       = trace_next_id;
+                        if_lane1_trace_wdata = trace_next_id + 1;
                     }
                 } else {
                     if if_fifo_wvalid && if_fifo_wready {
@@ -157,12 +172,20 @@ module core (
     // ====================================================
     // * ID stage
     // ====================================================
-    let ids_valid     : logic    = if_fifo_rvalid;
-    let ids_pc        : Addr     = if_fifo_rdata.addr;
-    let ids_inst_bits : Inst     = if_fifo_rdata.bits;
+    var ids_deferred_valid: logic;
+    var ids_deferred_addr : Addr ;
+    var ids_deferred_bits : Inst ;
+
+    let ids_valid     : logic    = ids_deferred_valid || if_fifo_rvalid;
+    let ids_pc        : Addr     = if ids_deferred_valid ? ids_deferred_addr : if_fifo_rdata.addr;
+    let ids_inst_bits : Inst     = if ids_deferred_valid ? ids_deferred_bits : if_fifo_rdata.bits;
     var ids_inst_valid: logic   ;
     var ids_ctrl      : InstCtrl;
     var ids_imm       : UIntX   ;
+
+    var ids_lane1_inst_valid: logic   ;
+    var ids_lane1_ctrl      : InstCtrl;
+    var ids_lane1_imm       : UIntX   ;
 
     inst decoder: inst_decoder (
         bits : ids_inst_bits ,
@@ -171,16 +194,70 @@ module core (
         imm  : ids_imm       ,
     );
 
+    inst lane1_decoder: inst_decoder (
+        bits : if_fifo_rdata.lane1_bits,
+        valid: ids_lane1_inst_valid    ,
+        ctrl : ids_lane1_ctrl          ,
+        imm  : ids_lane1_imm           ,
+    );
+
+    let ids_rd_addr       : logic<5> = ids_inst_bits[11:7];
+    let ids_lane1_rs1_addr: logic<5> = if_fifo_rdata.lane1_bits[19:15];
+    let ids_lane1_rs2_addr: logic<5> = if_fifo_rdata.lane1_bits[24:20];
+    let ids_lane1_rd_addr : logic<5> = if_fifo_rdata.lane1_bits[11:7];
+
+    let ids_lane1_alu : logic = ids_lane1_inst_valid && ids_lane1_ctrl.rwb_en && !inst_is_memop(ids_lane1_ctrl)
+        && !ids_lane1_ctrl.is_csr && !ids_lane1_ctrl.is_muldiv && !ids_lane1_ctrl.is_jump
+        && !inst_is_br(ids_lane1_ctrl);
+    let ids_lane1_raw : logic = ids_ctrl.rwb_en && ids_rd_addr != 0
+        && (inst_uses_rs1(ids_lane1_ctrl) && ids_rd_addr == ids_lane1_rs1_addr || inst_uses_rs2(ids_lane1_ctrl)
+            && ids_rd_addr == ids_lane1_rs2_addr);
+    let ids_lane1_waw : logic = ids_ctrl.rwb_en && ids_rd_addr != 0 && ids_lane1_ctrl.rwb_en && ids_rd_addr
+        == ids_lane1_rd_addr;
+    let ids_dual_issue: logic = !ids_deferred_valid && if_fifo_rdata.lane1_valid && ids_inst_valid && !ids_ctrl.is_csr
+        && ids_lane1_alu && !ids_lane1_raw && !ids_lane1_waw;
+
+    always_ff {
+        if_reset {
+            ids_deferred_valid = 0;
+            ids_deferred_addr  = 0;
+            ids_deferred_bits  = 0;
+            #[ifdef(KONATA_TRACE)]
+            block {
+                ids_deferred_trace_id = 0;
+            }
+        } else if fetch_redirect {
+            ids_deferred_valid = 0;
+        } else if exq_wready {
+            if ids_deferred_valid {
+                ids_deferred_valid = 0;
+            } else if if_fifo_rvalid && if_fifo_rready && if_fifo_rdata.lane1_valid && !ids_dual_issue {
+                ids_deferred_valid = 1;
+                ids_deferred_addr  = if_fifo_rdata.lane1_addr;
+                ids_deferred_bits  = if_fifo_rdata.lane1_bits;
+                #[ifdef(KONATA_TRACE)]
+                block {
+                    ids_deferred_trace_id = id_lane1_trace_id;
+                }
+            }
+        }
+    }
+
     always_comb {
         // ID -> EX
-        if_fifo_rready             = exq_wready;
-        exq_wvalid                 = if_fifo_rvalid;
-        exq_wdata.addr             = if_fifo_rdata.addr;
-        exq_wdata.bits             = if_fifo_rdata.bits;
+        if_fifo_rready             = exq_wready && !ids_deferred_valid;
+        exq_wvalid                 = ids_valid;
+        exq_wdata.addr             = ids_pc;
+        exq_wdata.bits             = ids_inst_bits;
         exq_wdata.ctrl             = ids_ctrl;
         exq_wdata.imm              = ids_imm;
-        exq_wdata.predicted_taken  = if_fifo_rdata.predicted_taken;
-        exq_wdata.predicted_target = if_fifo_rdata.predicted_target;
+        exq_wdata.predicted_taken  = if ids_deferred_valid ? 0 : if_fifo_rdata.predicted_taken;
+        exq_wdata.predicted_target = if ids_deferred_valid ? 0 : if_fifo_rdata.predicted_target;
+        exq_wdata.lane1_valid      = ids_dual_issue;
+        exq_wdata.lane1_addr       = if_fifo_rdata.lane1_addr;
+        exq_wdata.lane1_bits       = if_fifo_rdata.lane1_bits;
+        exq_wdata.lane1_ctrl       = ids_lane1_ctrl;
+        exq_wdata.lane1_imm        = ids_lane1_imm;
         // exception
         exq_wdata.expt = 0; // default
         if !ids_inst_valid {
@@ -211,39 +288,71 @@ module core (
     let exs_imm             : UIntX    = exq_rdata.imm;
     let exs_predicted_taken : logic    = exq_rdata.predicted_taken;
     let exs_predicted_target: Addr     = exq_rdata.predicted_target;
+    let exs_lane1_valid     : logic    = exq_rvalid && exq_rdata.lane1_valid;
+    let exs_lane1_pc        : Addr     = exq_rdata.lane1_addr;
+    let exs_lane1_inst_bits : Inst     = exq_rdata.lane1_bits;
+    let exs_lane1_ctrl      : InstCtrl = exq_rdata.lane1_ctrl;
+    let exs_lane1_imm       : UIntX    = exq_rdata.lane1_imm;
 
     // Registers
     var regfile: UIntX [32];
 
     // register number
-    let exs_rs1_addr: logic<5> = exs_inst_bits[19:15];
-    let exs_rs2_addr: logic<5> = exs_inst_bits[24:20];
+    let exs_rs1_addr      : logic<5> = exs_inst_bits[19:15];
+    let exs_rs2_addr      : logic<5> = exs_inst_bits[24:20];
+    let exs_lane1_rs1_addr: logic<5> = exs_lane1_inst_bits[19:15];
+    let exs_lane1_rs2_addr: logic<5> = exs_lane1_inst_bits[24:20];
 
     // forwarding
-    var wb_forward : forwarding; // WB -> EX
-    var mem_forward: forwarding; // MEM -> EX
+    var wb_forward       : forwarding; // WB -> EX
+    var mem_forward      : forwarding; // MEM -> EX
+    var wb_lane1_forward : forwarding;
+    var mem_lane1_forward: forwarding;
 
     // source register data
     let exs_rs1_data: UIntX = switch {
-        exs_rs1_addr == 0                                    : 0,
-        mem_forward.valid && mem_forward.addr == exs_rs1_addr: mem_forward.data,
-        wb_forward.valid && wb_forward.addr == exs_rs1_addr  : wb_forward.data,
-        default                                              : regfile[exs_rs1_addr],
+        exs_rs1_addr == 0                                                : 0,
+        mem_lane1_forward.valid && mem_lane1_forward.addr == exs_rs1_addr: mem_lane1_forward.data,
+        mem_forward.valid && mem_forward.addr == exs_rs1_addr            : mem_forward.data,
+        wb_lane1_forward.valid && wb_lane1_forward.addr == exs_rs1_addr  : wb_lane1_forward.data,
+        wb_forward.valid && wb_forward.addr == exs_rs1_addr              : wb_forward.data,
+        default                                                          : regfile[exs_rs1_addr],
     };
     let exs_rs2_data: UIntX = switch {
-        exs_rs2_addr == 0                                    : 0,
-        mem_forward.valid && mem_forward.addr == exs_rs2_addr: mem_forward.data,
-        wb_forward.valid && wb_forward.addr == exs_rs2_addr  : wb_forward.data,
-        default                                              : regfile[exs_rs2_addr],
+        exs_rs2_addr == 0                                                : 0,
+        mem_lane1_forward.valid && mem_lane1_forward.addr == exs_rs2_addr: mem_lane1_forward.data,
+        mem_forward.valid && mem_forward.addr == exs_rs2_addr            : mem_forward.data,
+        wb_lane1_forward.valid && wb_lane1_forward.addr == exs_rs2_addr  : wb_lane1_forward.data,
+        wb_forward.valid && wb_forward.addr == exs_rs2_addr              : wb_forward.data,
+        default                                                          : regfile[exs_rs2_addr],
+    };
+    let exs_lane1_rs1_data: UIntX = switch {
+        exs_lane1_rs1_addr == 0                                                : 0,
+        mem_lane1_forward.valid && mem_lane1_forward.addr == exs_lane1_rs1_addr: mem_lane1_forward.data,
+        mem_forward.valid && mem_forward.addr == exs_lane1_rs1_addr            : mem_forward.data,
+        wb_lane1_forward.valid && wb_lane1_forward.addr == exs_lane1_rs1_addr  : wb_lane1_forward.data,
+        wb_forward.valid && wb_forward.addr == exs_lane1_rs1_addr              : wb_forward.data,
+        default                                                                : regfile[exs_lane1_rs1_addr],
+    };
+    let exs_lane1_rs2_data: UIntX = switch {
+        exs_lane1_rs2_addr == 0                                                : 0,
+        mem_lane1_forward.valid && mem_lane1_forward.addr == exs_lane1_rs2_addr: mem_lane1_forward.data,
+        mem_forward.valid && mem_forward.addr == exs_lane1_rs2_addr            : mem_forward.data,
+        wb_lane1_forward.valid && wb_lane1_forward.addr == exs_lane1_rs2_addr  : wb_lane1_forward.data,
+        wb_forward.valid && wb_forward.addr == exs_lane1_rs2_addr              : wb_forward.data,
+        default                                                                : regfile[exs_lane1_rs2_addr],
     };
 
     // load/AMO は結果が来るまで forward できない
     var exs_mem_data_hazard: logic;
 
     // ALU
-    var exs_op1       : UIntX;
-    var exs_op2       : UIntX;
-    var exs_alu_result: UIntX;
+    var exs_op1             : UIntX;
+    var exs_op2             : UIntX;
+    var exs_alu_result      : UIntX;
+    var exs_lane1_op1       : UIntX;
+    var exs_lane1_op2       : UIntX;
+    var exs_lane1_alu_result: UIntX;
 
     always_comb {
         case exs_ctrl.itype {
@@ -266,12 +375,42 @@ module core (
         }
     }
 
+    always_comb {
+        case exs_lane1_ctrl.itype {
+            InstType::R, InstType::B: {
+                exs_lane1_op1 = exs_lane1_rs1_data;
+                exs_lane1_op2 = exs_lane1_rs2_data;
+            }
+            InstType::I, InstType::S: {
+                exs_lane1_op1 = exs_lane1_rs1_data;
+                exs_lane1_op2 = exs_lane1_imm;
+            }
+            InstType::U, InstType::J: {
+                exs_lane1_op1 = exs_lane1_pc;
+                exs_lane1_op2 = exs_lane1_imm;
+            }
+            default: {
+                exs_lane1_op1 = 'x;
+                exs_lane1_op2 = 'x;
+            }
+        }
+    }
+
     inst alum: alu (
         ctrl  : exs_ctrl      ,
         op1   : exs_op1       ,
         op2   : exs_op2       ,
         result: exs_alu_result,
     );
+
+    inst lane1_alum: alu (
+        ctrl  : exs_lane1_ctrl      ,
+        op1   : exs_lane1_op1       ,
+        op2   : exs_lane1_op2       ,
+        result: exs_lane1_alu_result,
+    );
+
+    let exs_lane1_result: UIntX = if exs_lane1_ctrl.is_lui ? exs_lane1_imm : exs_lane1_alu_result;
 
     // MulDiv
     var exs_muldiv_valid       : logic;
@@ -340,7 +479,7 @@ module core (
 
     // branch prediction
     let exs_is_control_transfer: logic = inst_is_br(exs_ctrl) || exs_ctrl.is_jump;
-    let exs_actual_taken       : logic = exs_ctrl.is_jump || exs_brunit_take;
+    let exs_actual_taken       : logic = exs_ctrl.is_jump || inst_is_br(exs_ctrl) && exs_brunit_take;
     let exs_actual_target      : Addr  = if inst_is_br(exs_ctrl) ? exs_pc + exs_imm : exs_alu_result & ~1;
     let bp_update_valid        : logic = exs_valid && exq_rready && exs_is_control_transfer && !control_hazard;
 
@@ -350,18 +489,24 @@ module core (
 
     always_comb {
         // EX -> MEM
-        exq_rready            = memq_wready && !exs_stall;
-        memq_wvalid           = exq_rvalid && !exs_stall;
-        memq_wdata.addr       = exq_rdata.addr;
-        memq_wdata.bits       = exq_rdata.bits;
-        memq_wdata.ctrl       = exq_rdata.ctrl;
-        memq_wdata.imm        = exq_rdata.imm;
-        memq_wdata.rs1_addr   = exs_rs1_addr;
-        memq_wdata.rs1_data   = exs_rs1_data;
-        memq_wdata.rs2_data   = exs_rs2_data;
-        memq_wdata.alu_result = if exs_ctrl.is_muldiv ? exs_muldiv_result : exs_alu_result;
-        memq_wdata.br_taken   = exs_ctrl.is_jump || inst_is_br(exs_ctrl) && exs_brunit_take;
-        memq_wdata.jump_addr  = if inst_is_br(exs_ctrl) ? exs_pc + exs_imm : exs_alu_result & ~1;
+        exq_rready                  = memq_wready && !exs_stall;
+        memq_wvalid                 = exq_rvalid && !exs_stall;
+        memq_wdata.addr             = exq_rdata.addr;
+        memq_wdata.bits             = exq_rdata.bits;
+        memq_wdata.ctrl             = exq_rdata.ctrl;
+        memq_wdata.imm              = exq_rdata.imm;
+        memq_wdata.rs1_addr         = exs_rs1_addr;
+        memq_wdata.rs1_data         = exs_rs1_data;
+        memq_wdata.rs2_data         = exs_rs2_data;
+        memq_wdata.alu_result       = if exs_ctrl.is_muldiv ? exs_muldiv_result : exs_alu_result;
+        memq_wdata.br_taken         = exs_ctrl.is_jump || inst_is_br(exs_ctrl) && exs_brunit_take;
+        memq_wdata.jump_addr        = if inst_is_br(exs_ctrl) ? exs_pc + exs_imm : exs_alu_result & ~1;
+        memq_wdata.lane1_valid      = 0;
+        memq_wdata.lane1_addr       = exq_rdata.lane1_addr;
+        memq_wdata.lane1_bits       = exq_rdata.lane1_bits;
+        memq_wdata.lane1_ctrl       = exq_rdata.lane1_ctrl;
+        memq_wdata.lane1_imm        = exq_rdata.lane1_imm;
+        memq_wdata.lane1_alu_result = exs_lane1_result;
         // exception
         let instruction_address_misaligned: logic = memq_wdata.br_taken && memq_wdata.jump_addr[1:0] != 2'b00;
         let memaddr                       : Addr  = if exs_ctrl.is_amo ? exs_rs1_data : exs_alu_result;
@@ -389,18 +534,23 @@ module core (
                 memq_wdata.expt.value = exs_alu_result;
             }
         }
+        memq_wdata.lane1_valid = exs_lane1_valid && !memq_wdata.expt.valid && !exs_actual_taken;
     }
 
     // ====================================================
     // * MEM stage
     // ====================================================
-    var mems_is_new   : logic           ;
-    let mems_valid    : logic            = memq_rvalid;
-    let mems_pc       : Addr             = memq_rdata.addr;
-    let mems_inst_bits: Inst             = memq_rdata.bits;
-    let mems_ctrl     : InstCtrl         = memq_rdata.ctrl;
-    let mems_expt     : ExceptionInfo    = memq_rdata.expt;
-    let mems_rd_addr  : logic        <5> = mems_inst_bits[11:7];
+    var mems_is_new         : logic           ;
+    let mems_valid          : logic            = memq_rvalid;
+    let mems_pc             : Addr             = memq_rdata.addr;
+    let mems_inst_bits      : Inst             = memq_rdata.bits;
+    let mems_ctrl           : InstCtrl         = memq_rdata.ctrl;
+    let mems_expt           : ExceptionInfo    = memq_rdata.expt;
+    let mems_rd_addr        : logic        <5> = mems_inst_bits[11:7];
+    let mems_lane1_valid    : logic            = memq_rvalid && memq_rdata.lane1_valid;
+    let mems_lane1_inst_bits: Inst             = memq_rdata.lane1_bits;
+    let mems_lane1_ctrl     : InstCtrl         = memq_rdata.lane1_ctrl;
+    let mems_lane1_rd_addr  : logic        <5> = mems_lane1_inst_bits[11:7];
 
     always_ff {
         if_reset {
@@ -483,40 +633,62 @@ module core (
     let mems_wb_ready  : logic = !(mems_ctrl.is_load || mems_ctrl.is_amo) || !memu_stall;
     let mems_will_write: logic = mems_valid && mems_ctrl.rwb_en && !csru_raise_trap && mems_rd_addr != 0;
 
-    assign mem_forward = forwarding'{valid: mems_will_write && mems_wb_ready, addr: mems_rd_addr, data: mems_wb_data,};
+    assign mem_forward       = forwarding'{
+        valid: mems_will_write && mems_wb_ready,
+        addr : mems_rd_addr                    ,
+        data : mems_wb_data                    ,
+    };
+    assign mem_lane1_forward = forwarding'{
+        valid: mems_lane1_valid && mems_lane1_ctrl.rwb_en && mems_lane1_rd_addr != 0,
+        addr : mems_lane1_rd_addr                                                   ,
+        data : memq_rdata.lane1_alu_result                                          ,
+    };
 
     assign exs_mem_data_hazard = mems_will_write && !mems_wb_ready
-        && (mems_rd_addr == exs_rs1_addr || mems_rd_addr == exs_rs2_addr);
+        && (mems_rd_addr == exs_rs1_addr || mems_rd_addr == exs_rs2_addr || exs_lane1_valid
+            && (inst_uses_rs1(exs_lane1_ctrl) && mems_rd_addr == exs_lane1_rs1_addr || inst_uses_rs2(exs_lane1_ctrl)
+                && mems_rd_addr == exs_lane1_rs2_addr));
 
     always_comb {
         // MEM -> WB
-        memq_rready             = wbq_wready && !memu_stall;
-        wbq_wvalid              = memq_rvalid && !memu_stall;
-        wbq_wdata.addr          = memq_rdata.addr;
-        wbq_wdata.bits          = memq_rdata.bits;
-        wbq_wdata.ctrl          = memq_rdata.ctrl;
-        wbq_wdata.imm           = memq_rdata.imm;
-        wbq_wdata.alu_result    = memq_rdata.alu_result;
-        wbq_wdata.mem_rdata     = memu_rdata;
-        wbq_wdata.csr_rdata     = csru_rdata;
-        wbq_wdata.counter_write = csru_counter_write;
-        wbq_wdata.counter_wdata = csru_counter_wdata;
-        wbq_wdata.raise_trap    = csru_raise_trap && !csru_trap_return;
+        memq_rready                = wbq_wready && !memu_stall;
+        wbq_wvalid                 = memq_rvalid && !memu_stall;
+        wbq_wdata.addr             = memq_rdata.addr;
+        wbq_wdata.bits             = memq_rdata.bits;
+        wbq_wdata.ctrl             = memq_rdata.ctrl;
+        wbq_wdata.imm              = memq_rdata.imm;
+        wbq_wdata.alu_result       = memq_rdata.alu_result;
+        wbq_wdata.mem_rdata        = memu_rdata;
+        wbq_wdata.csr_rdata        = csru_rdata;
+        wbq_wdata.counter_write    = csru_counter_write;
+        wbq_wdata.counter_wdata    = csru_counter_wdata;
+        wbq_wdata.raise_trap       = csru_raise_trap && !csru_trap_return;
+        wbq_wdata.lane1_valid      = memq_rdata.lane1_valid && !csru_raise_trap;
+        wbq_wdata.lane1_addr       = memq_rdata.lane1_addr;
+        wbq_wdata.lane1_bits       = memq_rdata.lane1_bits;
+        wbq_wdata.lane1_ctrl       = memq_rdata.lane1_ctrl;
+        wbq_wdata.lane1_imm        = memq_rdata.lane1_imm;
+        wbq_wdata.lane1_alu_result = memq_rdata.lane1_alu_result;
     }
 
     // ====================================================
     // * WB stage
     // ====================================================
-    let wbs_valid    : logic    = wbq_rvalid;
-    let wbs_pc       : Addr     = wbq_rdata.addr;
-    let wbs_inst_bits: Inst     = wbq_rdata.bits;
-    let wbs_ctrl     : InstCtrl = wbq_rdata.ctrl;
-    let wbs_imm      : UIntX    = wbq_rdata.imm;
+    let wbs_valid          : logic    = wbq_rvalid;
+    let wbs_pc             : Addr     = wbq_rdata.addr;
+    let wbs_inst_bits      : Inst     = wbq_rdata.bits;
+    let wbs_ctrl           : InstCtrl = wbq_rdata.ctrl;
+    let wbs_imm            : UIntX    = wbq_rdata.imm;
+    let wbs_lane1_valid    : logic    = wbq_rvalid && wbq_rdata.lane1_valid;
+    let wbs_lane1_inst_bits: Inst     = wbq_rdata.lane1_bits;
+    let wbs_lane1_ctrl     : InstCtrl = wbq_rdata.lane1_ctrl;
 
     let wbs_rd_addr      : logic<5>  = wbs_inst_bits[11:7];
     let wbs_retire       : logic     = wbq_rvalid && wbq_rready && !wbq_rdata.raise_trap;
     let wbs_counter_write: logic     = wbs_retire && wbq_rdata.counter_write;
     let wbs_csr_addr     : logic<12> = wbs_inst_bits[31:20];
+    let wbs_lane1_rd_addr: logic<5>  = wbs_lane1_inst_bits[11:7];
+    let wbs_lane1_retire : logic     = wbs_lane1_valid && wbq_rready;
     let wbs_wb_data      : UIntX     = switch {
         wbs_ctrl.is_lui                    : wbs_imm,
         wbs_ctrl.is_jump                   : wbs_pc + 4,
@@ -529,6 +701,9 @@ module core (
         // write back
         if wbs_valid && wbs_ctrl.rwb_en && !wbq_rdata.raise_trap {
             regfile[wbs_rd_addr] = wbs_wb_data;
+        }
+        if wbs_lane1_valid && wbs_lane1_ctrl.rwb_en {
+            regfile[wbs_lane1_rd_addr] = wbq_rdata.lane1_alu_result;
         }
     }
 
@@ -545,17 +720,26 @@ module core (
 
             if wbs_counter_write && wbs_csr_addr == CsrAddr::MINSTRET {
                 minstret = wbq_rdata.counter_wdata;
-            } else if wbs_retire {
-                minstret += 1;
+            } else {
+                case {wbs_lane1_retire, wbs_retire} {
+                    2'b11       : minstret += 2;
+                    2'b01, 2'b10: minstret += 1;
+                    default     : {}
+                }
             }
         }
     }
 
     // Register Forwarding (WB -> EX)
-    assign wb_forward = forwarding'{
+    assign wb_forward       = forwarding'{
         valid: wbs_valid && wbs_ctrl.rwb_en && !wbq_rdata.raise_trap && wbs_rd_addr != 0,
         addr : wbs_rd_addr                                                              ,
         data : wbs_wb_data                                                              ,
+    };
+    assign wb_lane1_forward = forwarding'{
+        valid: wbs_lane1_valid && wbs_lane1_ctrl.rwb_en && wbs_lane1_rd_addr != 0,
+        addr : wbs_lane1_rd_addr                                                 ,
+        data : wbq_rdata.lane1_alu_result                                        ,
     };
 
     always_comb {
@@ -660,6 +844,22 @@ module core (
             rvalid    : _             ,
             rdata     : id_trace_id   ,
         );
+
+        inst if_lane1_trace_fifo: fifo #(
+            DATA_TYPE: u64,
+            WIDTH    : 3  ,
+        ) (
+            clk                             ,
+            rst                             ,
+            flush     : fetch_redirect      ,
+            wready    : _                   ,
+            wready_two: _                   ,
+            wvalid    : if_fifo_wvalid      ,
+            wdata     : if_lane1_trace_wdata,
+            rready    : if_fifo_rready      ,
+            rvalid    : _                   ,
+            rdata     : id_lane1_trace_id   ,
+        );
     }
 
     // ====================================================
@@ -668,30 +868,63 @@ module core (
     #[ifdef(KONATA_TRACE)]
     always_ff {
         if_reset {
-            trace_next_id = 0;
-            ex_trace_id   = 0;
-            mem_trace_id  = 0;
-            wb_trace_id   = 0;
+            trace_next_id      = 0;
+            ex_trace_id        = 0;
+            ex_lane1_trace_id  = 0;
+            mem_trace_id       = 0;
+            mem_lane1_trace_id = 0;
+            wb_trace_id        = 0;
+            wb_lane1_trace_id  = 0;
             util::konata_init();
         } else {
             if !fetch_redirect && if_is_requested && i_membus.rvalid {
-                util::konata_stage(0, trace_next_id, if_pc_requested, i_membus.rdata);
-                trace_next_id += 1;
+                util::konata_stage(
+                    0,
+                    trace_next_id,
+                    if_pc_requested,
+                    if if_pc_requested[2] == 0 ? i_membus.rdata[31:0] : i_membus.rdata[63:32],
+                );
+                if !if_predicted_taken_requested && if_pc_requested[2] == 0 {
+                    util::konata_stage(0, trace_next_id + 1, if_pc_requested + 4, i_membus.rdata[63:32]);
+                    trace_next_id += 2;
+                } else {
+                    trace_next_id += 1;
+                }
             }
             if !fetch_redirect && if_fifo_wvalid && if_fifo_wready {
                 util::konata_stage(1, if_trace_wdata, if_fifo_wdata.addr, if_fifo_wdata.bits);
+                if if_fifo_wdata.lane1_valid {
+                    util::konata_stage(1, if_lane1_trace_wdata, if_fifo_wdata.lane1_addr, if_fifo_wdata.lane1_bits);
+                }
             }
-            if !control_hazard && !mispredicted && if_fifo_rvalid && if_fifo_rready {
-                util::konata_stage(2, id_trace_id, if_fifo_rdata.addr, if_fifo_rdata.bits);
-                ex_trace_id = id_trace_id;
+            if !control_hazard && !mispredicted && exq_wvalid && exq_wready {
+                if ids_deferred_valid {
+                    util::konata_stage(2, ids_deferred_trace_id, ids_pc, ids_inst_bits);
+                    ex_trace_id = ids_deferred_trace_id;
+                } else {
+                    util::konata_stage(2, id_trace_id, ids_pc, ids_inst_bits);
+                    ex_trace_id = id_trace_id;
+                    if ids_dual_issue {
+                        util::konata_stage(2, id_lane1_trace_id, if_fifo_rdata.lane1_addr, if_fifo_rdata.lane1_bits);
+                        ex_lane1_trace_id = id_lane1_trace_id;
+                    }
+                }
             }
             if !control_hazard && exq_rvalid && exq_rready {
                 util::konata_stage(3, ex_trace_id, exq_rdata.addr, exq_rdata.bits);
                 mem_trace_id = ex_trace_id;
+                if exs_lane1_valid {
+                    util::konata_stage(3, ex_lane1_trace_id, exs_lane1_pc, exs_lane1_inst_bits);
+                    mem_lane1_trace_id = ex_lane1_trace_id;
+                }
             }
             if memq_rvalid && memq_rready {
                 util::konata_stage(4, mem_trace_id, memq_rdata.addr, memq_rdata.bits);
                 wb_trace_id = mem_trace_id;
+                if mems_lane1_valid {
+                    util::konata_stage(4, mem_lane1_trace_id, memq_rdata.lane1_addr, memq_rdata.lane1_bits);
+                    wb_lane1_trace_id = mem_lane1_trace_id;
+                }
             }
             util::konata_cycle();
 
@@ -702,6 +935,9 @@ module core (
             }
             if wbq_rvalid && wbq_rready {
                 util::konata_retire(wb_trace_id, wbq_rdata.raise_trap);
+                if wbs_lane1_valid {
+                    util::konata_retire(wb_lane1_trace_id, 0);
+                }
             }
         }
     }
