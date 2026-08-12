@@ -10,7 +10,7 @@ module uart_tx #(
     tx_data_ready: output logic   ,
     tx_pin       : output logic   ,
 ) {
-    const CYCLE: u32 = CLK_FRE * 1000000 / BAUD_RATE;
+    const CYCLE: u16 = (CLK_FRE * 1000000 / BAUD_RATE) as u16;
 
     enum State {
         Idle,
