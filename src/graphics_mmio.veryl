@@ -30,9 +30,10 @@ module graphics_mmio (
     const HALF_PERIOD_CYCLES: logic<16> = 16'd2;
     const BYTE_GUARD_HALVES : logic<8>  = 8'd1;
 
-    enum TxState: logic {
+    enum TxState: logic<2> {
         Idle,
         Send,
+        Complete,
     }
 
     // READY の sync
@@ -66,6 +67,7 @@ module graphics_mmio (
     var data_byte_index     : logic  <2> ;
     var palette_entries_left: logic  <16>;
     var palette_channel     : logic  <2> ;
+    var completion_seen_busy: logic      ;
 
     var data_word : logic<32>;
     var data_valid: logic    ;
@@ -78,7 +80,7 @@ module graphics_mmio (
     let write_data32  : logic<32> = if membus.addr[2] ? membus.wdata[63:32] : membus.wdata[31:0];
     let busy          : logic     = state != TxState::Idle;
     let stream_command: logic     = active_command == OP_UPLOAD_RECT || active_command == OP_SET_PALETTE;
-    let data_ready    : logic     = busy && stream_command && !data_valid;
+    let data_ready    : logic     = state == TxState::Send && stream_command && !data_valid;
 
     function command_is_valid (
         command: input logic<8>,
@@ -174,6 +176,18 @@ module graphics_mmio (
         }
     }
 
+    // Low -> High をちゃんと見る
+    function command_has_completion () -> logic {
+        case active_command {
+            OP_CLEAR, OP_PRESENT: return 1;
+            OP_FILL_RECT        : return reg_w[15:0] != 16'd0 && reg_h[15:0] != 16'd0 && reg_x[15:0] <: 16'd320
+                && reg_y[15:0] <: 16'd200;
+            OP_UPLOAD_RECT      : return command_arg == 8'd0 && reg_w[15:0] != 16'd0 && reg_h[15:0] != 16'd0
+                && reg_x[15:0] <: 16'd320 && reg_y[15:0] <: 16'd200;
+            default             : return 0;
+        }
+    }
+
     function status_value () -> logic<32> {
         var value      : logic<32>;
         value       = 32'd0;
@@ -214,7 +228,7 @@ module graphics_mmio (
         membus.ready  = !response_pending;
         membus.rvalid = response_pending;
         membus.rdata  = response_rdata;
-        if membus.valid && membus.wen && register_index == REG_COMMAND && busy {
+        if membus.valid && membus.wen && register_index == REG_COMMAND && (busy || !ready) {
             membus.ready = 0;
         }
         if membus.valid && membus.wen && register_index == REG_DATA && busy && stream_command && data_valid {
@@ -243,6 +257,7 @@ module graphics_mmio (
             data_byte_index      = 2'd0;
             palette_entries_left = 16'd0;
             palette_channel      = 2'd0;
+            completion_seen_busy = 0;
             data_word            = 32'd0;
             data_valid           = 0;
             error                = 0;
@@ -278,6 +293,7 @@ module graphics_mmio (
                                 data_byte_index      = 2'd0;
                                 palette_entries_left = reg_w[15:0];
                                 palette_channel      = 2'd0;
+                                completion_seen_busy = 0;
                                 data_valid           = 0;
                                 link_sclk            = 0;
                                 link_mosi            = 0;
@@ -327,11 +343,17 @@ module graphics_mmio (
                             link_sclk = 0;
                             if bit_index == 3'd0 {
                                 if is_last_packet_byte() {
-                                    link_cs_n      = 1;
-                                    link_mosi      = 0;
-                                    active_command = 0;
-                                    data_valid     = 0;
-                                    state          = TxState::Idle;
+                                    link_cs_n  = 1;
+                                    link_mosi  = 0;
+                                    data_valid = 0;
+                                    if !command_has_completion() {
+                                        active_command = 0;
+                                        state          = TxState::Idle;
+                                    } else {
+                                        // READY
+                                        completion_seen_busy = !ready;
+                                        state                = TxState::Complete;
+                                    }
                                 } else {
                                     case active_command {
                                         OP_UPLOAD_RECT: {
@@ -379,6 +401,19 @@ module graphics_mmio (
                         }
                     } else {
                         half_count += 16'd1;
+                    }
+                }
+                TxState::Complete: {
+                    link_sclk = 0;
+                    link_mosi = 0;
+                    link_cs_n = 1;
+
+                    if !ready {
+                        completion_seen_busy = 1;
+                    }
+                    if completion_seen_busy && ready {
+                        active_command = 0;
+                        state          = TxState::Idle;
                     }
                 }
                 default: state = TxState::Idle;
