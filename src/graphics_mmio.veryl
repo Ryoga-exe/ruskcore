@@ -177,7 +177,7 @@ module graphics_mmio (
     function status_value () -> logic<32> {
         var value      : logic<32>;
         value       = 32'd0;
-        value[0]    = !busy;
+        value[0]    = !busy && ready;
         value[1]    = busy;
         value[2]    = ready;
         value[3]    = data_ready;
