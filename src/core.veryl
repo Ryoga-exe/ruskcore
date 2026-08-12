@@ -417,26 +417,25 @@ module core (
         led                                 ,
     );
 
+    let mems_wb_data: UIntX = switch {
+        mems_ctrl.is_lui                     : memq_rdata.imm,
+        mems_ctrl.is_jump                    : mems_pc + 4,
+        mems_ctrl.is_load || mems_ctrl.is_amo: memu_rdata,
+        mems_ctrl.is_csr                     : csru_rdata,
+        default                              : memq_rdata.alu_result,
+    };
+
     // Hazard
     assign control_hazard         = mems_valid && (csru_raise_trap || mems_ctrl.is_jump || memq_rdata.br_taken);
     assign control_hazard_pc_next = if csru_raise_trap ? csru_trap_vector : memq_rdata.jump_addr;
 
     // Register Forwarding (MEM -> EX)
-    let mems_can_forward : logic = !(mems_ctrl.is_load || mems_ctrl.is_amo || mems_ctrl.is_csr);
-    let mems_will_write  : logic = mems_valid && mems_ctrl.rwb_en && !csru_raise_trap && mems_rd_addr != 0;
-    let mems_forward_data: UIntX = switch {
-        mems_ctrl.is_lui : memq_rdata.imm,
-        mems_ctrl.is_jump: mems_pc + 4,
-        default          : memq_rdata.alu_result,
-    };
+    let mems_wb_ready  : logic = !(mems_ctrl.is_load || mems_ctrl.is_amo) || !memu_stall;
+    let mems_will_write: logic = mems_valid && mems_ctrl.rwb_en && !csru_raise_trap && mems_rd_addr != 0;
 
-    assign mem_forward = forwarding'{
-        valid: mems_will_write && mems_can_forward,
-        addr : mems_rd_addr                       ,
-        data : mems_forward_data                  ,
-    };
+    assign mem_forward = forwarding'{valid: mems_will_write && mems_wb_ready, addr: mems_rd_addr, data: mems_wb_data,};
 
-    assign exs_mem_data_hazard = mems_will_write && !mems_can_forward
+    assign exs_mem_data_hazard = mems_will_write && !mems_wb_ready
         && (mems_rd_addr == exs_rs1_addr || mems_rd_addr == exs_rs2_addr);
 
     always_comb {
