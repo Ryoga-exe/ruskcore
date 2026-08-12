@@ -143,7 +143,12 @@ module core (
     var ids_ctrl      : InstCtrl;
     var ids_imm       : UIntX   ;
 
-    inst decoder: inst_decoder ( bits: ids_inst_bits, valid: ids_inst_valid, ctrl: ids_ctrl, imm: ids_imm );
+    inst decoder: inst_decoder (
+        bits : ids_inst_bits ,
+        valid: ids_inst_valid,
+        ctrl : ids_ctrl      ,
+        imm  : ids_imm       ,
+    );
 
     always_comb {
         // ID -> EX
@@ -236,7 +241,12 @@ module core (
         }
     }
 
-    inst alum: alu ( ctrl: exs_ctrl, op1: exs_op1, op2: exs_op2, result: exs_alu_result );
+    inst alum: alu (
+        ctrl  : exs_ctrl      ,
+        op1   : exs_op1       ,
+        op2   : exs_op2       ,
+        result: exs_alu_result,
+    );
 
     // MulDiv
     var exs_muldiv_valid       : logic;
@@ -294,7 +304,12 @@ module core (
     // Bru
     var exs_brunit_take: logic;
 
-    inst bru: brunit ( funct3: exs_ctrl.funct3, op1: exs_op1, op2: exs_op2, take: exs_brunit_take );
+    inst bru: brunit (
+        funct3: exs_ctrl.funct3,
+        op1   : exs_op1        ,
+        op2   : exs_op2        ,
+        take  : exs_brunit_take,
+    );
 
     let exs_stall: logic = exs_mem_data_hazard || exs_muldiv_stall;
 
@@ -602,30 +617,30 @@ module core (
     #[ifdef(KONATA_TRACE)]
     always_ff {
         if_reset {
-            trace_next_id     = 0;
-            ex_trace_id       = 0;
-            mem_trace_id      = 0;
-            wb_trace_id       = 0;
+            trace_next_id = 0;
+            ex_trace_id   = 0;
+            mem_trace_id  = 0;
+            wb_trace_id   = 0;
             util::konata_init();
         } else {
             if !control_hazard && if_is_requested && i_membus.rvalid {
                 util::konata_stage(0, trace_next_id, if_pc_requested, i_membus.rdata);
-                trace_next_id      += 1;
+                trace_next_id += 1;
             }
             if !control_hazard && if_fifo_wvalid && if_fifo_wready {
                 util::konata_stage(1, if_trace_wdata, if_fifo_wdata.addr, if_fifo_wdata.bits);
             }
             if !control_hazard && if_fifo_rvalid && if_fifo_rready {
                 util::konata_stage(2, id_trace_id, if_fifo_rdata.addr, if_fifo_rdata.bits);
-                ex_trace_id        = id_trace_id;
+                ex_trace_id = id_trace_id;
             }
             if !control_hazard && exq_rvalid && exq_rready {
                 util::konata_stage(3, ex_trace_id, exq_rdata.addr, exq_rdata.bits);
-                mem_trace_id       = ex_trace_id;
+                mem_trace_id = ex_trace_id;
             }
             if memq_rvalid && memq_rready {
                 util::konata_stage(4, mem_trace_id, memq_rdata.addr, memq_rdata.bits);
-                wb_trace_id        = mem_trace_id;
+                wb_trace_id = mem_trace_id;
             }
             util::konata_cycle();
 
