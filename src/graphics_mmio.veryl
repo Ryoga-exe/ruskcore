@@ -1,5 +1,7 @@
 import eei::*;
 
+// 遅いので 4 つまとめて出す
+// 描画回路を流用
 module graphics_mmio (
     clk       : input   clock        ,
     rst       : input   reset        ,
@@ -43,6 +45,13 @@ module graphics_mmio (
         }
     }
     let ready: logic = ready_sync[2];
+
+    var reg_x    : logic<32>;
+    var reg_y    : logic<32>;
+    var reg_w    : logic<32>;
+    var reg_h    : logic<32>;
+    var reg_color: logic<32>;
+
     var state               : TxState    ;
     var active_command      : logic  <8> ;
     var command_arg         : logic  <8> ;
@@ -176,6 +185,7 @@ module graphics_mmio (
         value[15:8] = active_command;
         return value;
     }
+
     function register_value (
         index: input logic<3>,
     ) -> logic<32> {
@@ -197,5 +207,18 @@ module graphics_mmio (
         upper: input logic    ,
     ) -> logic<MEMBUS_DATA_WIDTH> {
         return if upper ? {value, 32'd0} : {32'd0, value};
+    }
+
+    // second DATA write
+    always_comb {
+        membus.ready  = !response_pending;
+        membus.rvalid = response_pending;
+        membus.rdata  = response_rdata;
+        if membus.valid && membus.wen && register_index == REG_COMMAND && busy {
+            membus.ready = 0;
+        }
+        if membus.valid && membus.wen && register_index == REG_DATA && busy && stream_command && data_valid {
+            membus.ready = 0;
+        }
     }
 }
