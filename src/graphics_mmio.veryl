@@ -1,0 +1,46 @@
+import eei::*;
+
+module graphics_mmio (
+    clk       : input   clock        ,
+    rst       : input   reset        ,
+    membus    : modport Membus::slave,
+    link_ready: input   logic        ,
+    link_sclk : output  logic        ,
+    link_mosi : output  logic        ,
+    link_cs_n : output  logic        ,
+) {
+    // commands
+    const OP_CLEAR      : logic<8> = 8'h01;
+    const OP_FILL_RECT  : logic<8> = 8'h02;
+    const OP_UPLOAD_RECT: logic<8> = 8'h03;
+    const OP_SET_PALETTE: logic<8> = 8'h04;
+    const OP_PRESENT    : logic<8> = 8'h05;
+
+    const REG_STATUS : logic<3> = 3'd0;
+    const REG_COMMAND: logic<3> = 3'd1;
+    const REG_X      : logic<3> = 3'd2;
+    const REG_Y      : logic<3> = 3'd3;
+    const REG_W      : logic<3> = 3'd4;
+    const REG_H      : logic<3> = 3'd5;
+    const REG_COLOR  : logic<3> = 3'd6;
+    const REG_DATA   : logic<3> = 3'd7;
+
+    const HALF_PERIOD_CYCLES: logic<16> = 16'd2;
+    const BYTE_GUARD_HALVES : logic<8>  = 8'd1;
+
+    enum TxState: logic {
+        Idle,
+        Send,
+    }
+
+    // READY の sync
+    var ready_sync: logic<3>;
+    always_ff {
+        if_reset {
+            ready_sync = 3'b000;
+        } else {
+            ready_sync = {ready_sync[1:0], link_ready};
+        }
+    }
+    let ready: logic = ready_sync[2];
+}
