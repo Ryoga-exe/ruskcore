@@ -21,7 +21,7 @@ module bpunit (
     let exs_index = exs_pc[3+:8];
 
     always_comb {
-        ids_predict_taken = pht[ids_index][0];
+        ids_predict_taken = pht[ids_index] >= 2'b10;
     }
 
     always_ff {
@@ -29,23 +29,9 @@ module bpunit (
             // ???
         } else if exs_update_valid {
             if exs_update_taken {
-                // 01 -> 00 -> 10 -> 11
-                pht[exs_index] = case pht[exs_index] {
-                    2'b01  : 2'b00,
-                    2'b00  : 2'b10,
-                    2'b10  : 2'b11,
-                    2'b11  : 2'b11,
-                    default: 2'b11,
-                };
+                pht[exs_index] += if pht[exs_index] == 2'b11 ? 0 : 1;
             } else {
-                // 11 -> 10 -> 00 -> 01
-                pht[exs_index] = case pht[exs_index] {
-                    2'b11  : 2'b10,
-                    2'b10  : 2'b00,
-                    2'b00  : 2'b01,
-                    2'b01  : 2'b01,
-                    default: 2'b01,
-                };
+                pht[exs_index] -= if pht[exs_index] == 2'b00 ? 0 : 1;
             }
         }
     }
