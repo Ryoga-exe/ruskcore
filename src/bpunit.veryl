@@ -5,9 +5,34 @@ import eei::*;
 module bpunit (
     clk: input clock,
     rst: input reset,
-    pc : input Addr ,
+    // from ID stage -> predict
+    ids_pc           : input  Addr ,
+    ids_predict_taken: output logic,
+    // from EX stage -> update
+    exs_pc          : input Addr ,
+    exs_update_valid: input logic,
+    exs_update_taken: input logic,
 ) {
     const HISTORY_WIDTH: u32 = 8;
 
     var pht: logic<2> [2 ** HISTORY_WIDTH];
+
+    let ids_index = ids_pc[3+:8];
+    let exs_index = exs_pc[3+:8];
+
+    always_comb {
+        ids_predict_taken = pht[ids_index] >= 2'b10;
+    }
+
+    always_ff {
+        if_reset {
+            // ???
+        } else if exs_update_valid {
+            if exs_update_taken {
+                pht[exs_index] += if pht[exs_index] == 2'b11 ? 0 : 1;
+            } else {
+                pht[exs_index] -= if pht[exs_index] == 2'b00 ? 0 : 1;
+            }
+        }
+    }
 }
