@@ -299,7 +299,7 @@ module mulunit #(
 }
 
 module divunit #(
-    param WIDTH: u32 = 0,
+    param WIDTH: u32 = XLEN,
 ) (
     clk      : input  clock       ,
     rst      : input  reset       ,
@@ -312,59 +312,86 @@ module divunit #(
 ) {
     enum State {
         Idle,
-        ZeroCheck,
         SubLoop,
     }
 
     var state: State;
 
-    var dividend_saved: logic<WIDTH * 2>;
-    var divisor_saved : logic<WIDTH * 2>;
+    const REM_WIDTH : u32 = WIDTH + 2;
+    const ITERATIONS: u32 = WIDTH / 2;
+
+    var dividend_saved      : logic<WIDTH>    ;
+    var divisor_saved       : logic<REM_WIDTH>;
+    var thrice_divisor_saved: logic<REM_WIDTH>;
+    var remainder_saved     : logic<REM_WIDTH>;
+    var shifted_remainder   : logic<REM_WIDTH>;
+    var twice_divisor       : logic<REM_WIDTH>;
+    var next_remainder      : logic<REM_WIDTH>;
+    var quotient_digit      : logic<2>        ;
+    var next_quotient       : logic<WIDTH>    ;
 
     always_comb {
-        remainder = dividend_saved[WIDTH - 1:0];
+        remainder         = remainder_saved[0+:WIDTH];
+        shifted_remainder = {remainder_saved[0+:WIDTH], dividend_saved[WIDTH - 1:WIDTH - 2]};
+        twice_divisor     = divisor_saved << 1;
+
+        if shifted_remainder >= thrice_divisor_saved {
+            quotient_digit = 3;
+            next_remainder = shifted_remainder - thrice_divisor_saved;
+        } else if shifted_remainder >= twice_divisor {
+            quotient_digit = 2;
+            next_remainder = shifted_remainder - twice_divisor;
+        } else if shifted_remainder >= divisor_saved {
+            quotient_digit = 1;
+            next_remainder = shifted_remainder - divisor_saved;
+        } else {
+            quotient_digit = 0;
+            next_remainder = shifted_remainder;
+        }
+        next_quotient = {quotient[WIDTH - 3:0], quotient_digit};
     }
 
-    var sub_count: u32;
+    var sub_count: logic<6>;
 
     always_ff {
         if_reset {
-            state          = State::Idle;
-            quotient       = 0;
-            sub_count      = 0;
-            dividend_saved = 0;
-            divisor_saved  = 0;
-            rvalid         = 0;
+            state                = State::Idle;
+            quotient             = 0;
+            sub_count            = 0;
+            dividend_saved       = 0;
+            divisor_saved        = 0;
+            thrice_divisor_saved = 0;
+            remainder_saved      = 0;
+            rvalid               = 0;
         } else {
             rvalid = 0; // default
             case state {
-                State::Idle     : if valid {
-                    state          = State::ZeroCheck;
-                    dividend_saved = {1'b0 repeat WIDTH, dividend};
-                    divisor_saved  = {1'b0, divisor, 1'b0 repeat WIDTH - 1};
-                    quotient       = 0;
-                    sub_count      = 0;
+                State::Idle   : if valid {
+                    if divisor == 0 {
+                        state           = State::Idle;
+                        quotient        = '1;
+                        remainder_saved = {2'b00, dividend};
+                        rvalid          = 1;
+                    } else {
+                        state                = State::SubLoop;
+                        dividend_saved       = dividend;
+                        divisor_saved        = {2'b00, divisor};
+                        thrice_divisor_saved = {2'b00, divisor} + {1'b0, divisor, 1'b0};
+                        remainder_saved      = 0;
+                        quotient             = 0;
+                        sub_count            = 0;
+                    }
                 }
-                State::ZeroCheck: if divisor_saved == 0 {
-                    state    = State::Idle;
-                    quotient = '1;
-                    rvalid   = 1;
-                } else {
-                    state = State::SubLoop;
-                }
-                State::SubLoop  : {
-                    if sub_count == WIDTH - 1 {
+                State::SubLoop: {
+                    dividend_saved  <<= 2;
+                    remainder_saved =   next_remainder;
+                    quotient        =   next_quotient;
+
+                    if sub_count == ITERATIONS[0+:6] - 1 {
                         state  = State::Idle;
                         rvalid = 1;
                     }
-                    if dividend_saved >= divisor_saved {
-                        dividend_saved -= divisor_saved;
-                        quotient       =  (quotient << 1) + 1;
-                    } else {
-                        quotient <<= 1;
-                    }
-                    divisor_saved >>= 1;
-                    sub_count     +=  1;
+                    sub_count += 1;
                 }
                 default: {}
             }
