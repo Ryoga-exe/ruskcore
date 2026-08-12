@@ -17,7 +17,7 @@ module bpunit (
     exs_update_target       : input Addr ,
     exs_update_unconditional: input logic,
 ) {
-    const HISTORY_WIDTH: u32 = 8;
+    const HISTORY_WIDTH: u32 = 5;
     const ENTRY_COUNT  : u32 = 2 ** HISTORY_WIDTH;
     const TAG_WIDTH    : u32 = XLEN - HISTORY_WIDTH - 2;
 
@@ -37,6 +37,7 @@ module bpunit (
         if_predict_target = targets[if_index];
     }
 
+    #[allow(missing_reset_statement)]
     always_ff {
         if_reset {
             valid_bits = 0;
