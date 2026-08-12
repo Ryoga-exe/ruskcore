@@ -1,0 +1,94 @@
+import eei::*;
+
+module uart_mmio #(
+    param CLK_FRE   : u32 = 50    , //clock frequency(Mhz)
+    param BAUD_RATE : u32 = 115200, //serial baud rate
+    param FIFO_WIDTH: u32 = 4     ,
+) (
+    clk   : input   clock        ,
+    rst   : input   reset        ,
+    rxd   : input   logic        ,
+    txd   : output  logic        ,
+    membus: modport Membus::slave,
+) {
+    var rx_data      : logic<8>;
+    var rx_data_valid: logic   ;
+    var rx_data_ready: logic   ;
+
+    inst u_rx: uart_rx #(
+        CLK_FRE    ,
+        BAUD_RATE  ,
+    ) (
+        clk               ,
+        rst               ,
+        rx_data           ,
+        rx_data_valid     ,
+        rx_data_ready     ,
+        rx_pin       : rxd,
+    );
+
+    var tx_data      : logic<8>;
+    var tx_data_valid: logic   ;
+    var tx_data_ready: logic   ;
+
+    inst u_tx: uart_tx #(
+        CLK_FRE    ,
+        BAUD_RATE  ,
+    ) (
+        clk               ,
+        rst               ,
+        tx_data           ,
+        tx_data_valid     ,
+        tx_data_ready     ,
+        tx_pin       : txd,
+    );
+
+    // RX FIFO: UART -> MMIO
+    var rx_fifo_rdata : logic<8>;
+    var rx_fifo_rvalid: logic   ;
+    var rx_fifo_rready: logic   ;
+
+    inst u_rx_fifo: fifo #(
+        DATA_TYPE: logic<8>  ,
+        WIDTH    : FIFO_WIDTH,
+    ) (
+        clk                       ,
+        rst                       ,
+        flush     : 0             ,
+        wready    : rx_data_ready ,
+        wready_two: _             ,
+        wvalid    : rx_data_valid ,
+        wdata     : rx_data       ,
+        rready    : rx_fifo_rready,
+        rvalid    : rx_fifo_rvalid,
+        rdata     : rx_fifo_rdata ,
+    );
+
+    // TX FIFO: MMIO -> UART
+    var tx_fifo_wdata : logic<8>;
+    var tx_fifo_wvalid: logic   ;
+    var tx_fifo_wready: logic   ;
+
+    inst u_tx_fifo: fifo #(
+        DATA_TYPE: logic<8>  ,
+        WIDTH    : FIFO_WIDTH,
+    ) (
+        clk                       ,
+        rst                       ,
+        flush     : 0             ,
+        wready    : tx_fifo_wready,
+        wready_two: _             ,
+        wvalid    : tx_fifo_wvalid,
+        wdata     : tx_fifo_wdata ,
+        rready    : tx_data_ready ,
+        rvalid    : tx_data_valid ,
+        rdata     : tx_data       ,
+    );
+
+    // TODO: MMIO register logicで置き換える
+    assign rx_fifo_rready = 0;
+    assign tx_fifo_wvalid = 0;
+    assign tx_fifo_wdata  = 0;
+
+    // Membus request/response
+}
