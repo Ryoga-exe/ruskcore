@@ -211,17 +211,12 @@ module mulunit #(
     enum State {
         Idle,
         AddLoop,
-        Finish,
     }
 
     var state: State;
 
     var op1zext: logic<WIDTH * 2>;
     var op2zext: logic<WIDTH * 2>;
-
-    always_comb {
-        rvalid = (state == State::Finish);
-    }
 
     var add_count: logic<32>;
 
@@ -232,6 +227,7 @@ module mulunit #(
             add_count = 0;
             op1zext   = 0;
             op2zext   = 0;
+            rvalid    = 0;
         } else {
             case state {
                 State::Idle   : if valid {
@@ -240,18 +236,21 @@ module mulunit #(
                     add_count = 0;
                     op1zext   = {1'b0 repeat WIDTH, op1};
                     op2zext   = {1'b0 repeat WIDTH, op2};
+                    rvalid    = 0;
                 }
-                State::AddLoop: if add_count == WIDTH {
-                    state = State::Finish;
-                } else {
+                State::AddLoop: {
+                    if add_count == WIDTH - 1 {
+                        state  = State::Idle;
+                        rvalid = 1;
+                    }
+
                     if op2zext[add_count] {
                         result += op1zext;
                     }
                     op1zext   <<= 1;
                     add_count +=  1;
                 }
-                State::Finish : state = State::Idle;
-                default       : {}
+                default: {}
             }
         }
     }
