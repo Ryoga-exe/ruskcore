@@ -43,4 +43,7 @@ module graphics_mmio (
         }
     }
     let ready: logic = ready_sync[2];
+    let busy          : logic     = state != TxState::Idle;
+    let stream_command: logic     = active_command == OP_UPLOAD_RECT || active_command == OP_SET_PALETTE;
+    let data_ready    : logic     = busy && stream_command && !data_valid;
 }
