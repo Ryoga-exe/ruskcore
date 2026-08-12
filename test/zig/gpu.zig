@@ -68,9 +68,43 @@ pub export fn main() noreturn {
     graphics.present(1);
 
     var frame: u8 = 0;
+    var back: u1 = 1;
+    var x: i32 = 16;
+    var y: i32 = 12;
+    var prev_x = [2]i32{ x, x };
+    var prev_y = [2]i32{ y, y };
+
+    var dx: i32 = 3;
+    var dy: i32 = 2;
+
     while (true) {
-        graphics.fillRect(100, 100, 100, 100, 1);
+        graphics.fillRect(@intCast(prev_x[back]), @intCast(prev_y[back]), 32, 24, 0);
+        graphics.fillRect(@intCast(x), @intCast(y), 32, 24, 1);
         graphics.present(frame);
+
+        prev_x[back] = x;
+        prev_y[back] = y;
+
         frame +%= 1;
+        back = ~back;
+
+        x += dx;
+        y += dy;
+
+        if (x <= 0) {
+            x = 0;
+            dx = -dx;
+        } else if (x >= 320 - 32) {
+            x = 320 - 32;
+            dx = -dx;
+        }
+
+        if (y <= 0) {
+            y = 0;
+            dy = -dy;
+        } else if (y >= 200 - 24) {
+            y = 200 - 24;
+            dy = -dy;
+        }
     }
 }
