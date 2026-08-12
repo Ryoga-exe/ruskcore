@@ -7,9 +7,9 @@ module uart_mmio #(
 ) (
     clk   : input   clock        ,
     rst   : input   reset        ,
+    membus: modport Membus::slave,
     rxd   : input   logic        ,
     txd   : output  logic        ,
-    membus: modport Membus::slave,
 ) {
     const REG_RBR_THR: logic<12> = 12'h000;
     const REG_LSR    : logic<12> = 12'h005;

@@ -26,6 +26,10 @@ package eei {
     const MMAP_ROM_BEGIN: Addr = 'h1000 as Addr;
     const MMAP_ROM_END  : Addr = MMAP_ROM_BEGIN + 'h3ff as Addr;
 
+    // UART (16550 like)
+    const MMAP_UART_BEGIN: Addr = 'h1000_0000 as Addr;
+    const MMAP_UART_END  : Addr = MMAP_UART_BEGIN + 'h3ff as Addr;
+
     // GPU modoki
     const MMAP_GRAPHICS_BEGIN: Addr = 'h1001_0000 as Addr;
     const MMAP_GRAPHICS_END  : Addr = MMAP_GRAPHICS_BEGIN + 'h1f as Addr;
