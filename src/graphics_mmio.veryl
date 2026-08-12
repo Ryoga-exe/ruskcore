@@ -70,4 +70,35 @@ module graphics_mmio (
     let busy          : logic     = state != TxState::Idle;
     let stream_command: logic     = active_command == OP_UPLOAD_RECT || active_command == OP_SET_PALETTE;
     let data_ready    : logic     = busy && stream_command && !data_valid;
+
+    function command_is_valid (
+        command: input logic<8>,
+    ) -> logic {
+        return command == OP_CLEAR || command == OP_FILL_RECT || command == OP_UPLOAD_RECT || command == OP_SET_PALETTE
+            || command == OP_PRESENT;
+    }
+
+    function is_stream_index (
+        index: input logic<4>,
+    ) -> logic {
+        return (active_command == OP_UPLOAD_RECT && index == 4'd12)
+            || (active_command == OP_SET_PALETTE && index == 4'd6);
+    }
+
+    function packet_byte_available (
+        index: input logic<4>,
+    ) -> logic {
+        return !is_stream_index(index) || data_valid;
+    }
+    function status_value () -> logic<32> {
+        var value      : logic<32>;
+        value       = 32'd0;
+        value[0]    = !busy;
+        value[1]    = busy;
+        value[2]    = ready;
+        value[3]    = data_ready;
+        value[4]    = error;
+        value[15:8] = active_command;
+        return value;
+    }
 }
