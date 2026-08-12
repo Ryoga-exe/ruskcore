@@ -91,44 +91,51 @@ module uart_mmio #(
     );
 
     // Membus request/response
-    var pending   : logic;
-    var addr_saved: Addr ;
-    var wen_saved : logic;
+    var pending        : logic;
+    var resp_valid     : logic;
+    var resp_data_saved: UIntX;
+    var ready_calc     : logic;
 
-    var resp_valid    : logic;
-    var resp_data_calc: UIntX;
-
-    var ready_calc: logic;
+    let request_fire  : logic     = membus.valid && ready_calc;
+    let request_offset: logic<12> = membus.addr[11:0];
+    let request_lane  : logic<3>  = membus.addr[2:0];
+    let request_shift : logic<6>  = {request_lane, 3'b000};
 
     always_comb {
         membus.ready  = ready_calc;
         membus.rvalid = resp_valid;
-        membus.rdata  = resp_data_calc;
+        membus.rdata  = resp_data_saved;
     }
 
     // RX FIFO pop
     always_comb {
         rx_fifo_rready = 0;
-        if !pending && ready_calc && membus.valid && !membus.wen {
-            let offset: logic<12> = membus.addr[11:0];
-            if offset == REG_RBR_THR && !rx_fifo_rvalid {
+        if request_fire && !membus.wen {
+            if request_offset == REG_RBR_THR && rx_fifo_rvalid {
                 rx_fifo_rready = 1;
             }
         }
     }
 
+    // TX FIFO push
     always_comb {
-        resp_data_calc = 0;
-        if resp_valid && !wen_saved {
-            let offset: logic<12> = addr_saved[11:0];
-            let bi    : logic<3>  = addr_saved[2:0];
-            let sh    : logic<6>  = {bi, 3'b000};
+        tx_fifo_wvalid = 0;
+        tx_fifo_wdata  = 0;
 
-            if offset == REG_RBR_THR {
-                resp_data_calc = (rx_fifo_rdata as UIntX) << sh;
-            } else if offset == REG_LSR {
-                resp_data_calc = {1'b0, tx_data_ready, tx_fifo_wvalid, 1'b0, 1'b0, 1'b0, 1'b0, !rx_fifo_rready} as UIntX
-                    << sh;
+        if request_fire && membus.wen {
+            if request_offset == REG_RBR_THR && membus.wmask[request_lane] {
+                tx_fifo_wvalid = 1;
+                tx_fifo_wdata  = case request_lane {
+                    0      : membus.wdata[7:0],
+                    1      : membus.wdata[15:8],
+                    2      : membus.wdata[23:16],
+                    3      : membus.wdata[31:24],
+                    4      : membus.wdata[39:32],
+                    5      : membus.wdata[47:40],
+                    6      : membus.wdata[55:48],
+                    7      : membus.wdata[63:56],
+                    default: 8'h00,
+                };
             }
         }
     }
@@ -137,11 +144,8 @@ module uart_mmio #(
         ready_calc = !pending;
 
         if ready_calc && membus.valid {
-            let offset: logic<12> = membus.addr[11:0];
-            let bi    : logic<3>  = membus.addr[2:0];
-
-            if membus.wen && (offset == REG_RBR_THR) {
-                if membus.wmask[bi] && !tx_fifo_wvalid {
+            if membus.wen && (request_offset == REG_RBR_THR) {
+                if membus.wmask[request_lane] && !tx_fifo_wready {
                     ready_calc = 0;
                 }
             }
@@ -150,18 +154,11 @@ module uart_mmio #(
 
     always_ff {
         if_reset {
-            pending    = 0;
-            addr_saved = 0;
-            wen_saved  = 0;
-
-            resp_valid = 0;
-
-            tx_fifo_wvalid = 0;
-            tx_fifo_wdata  = 0;
+            pending         = 0;
+            resp_valid      = 0;
+            resp_data_saved = 0;
         } else {
-            resp_valid     = 0;
-            tx_fifo_wvalid = 0;
-            tx_fifo_wdata  = 0;
+            resp_valid = 0;
 
             // Response
             if pending {
@@ -170,34 +167,23 @@ module uart_mmio #(
             }
 
             // Accept
-            if !pending && membus.valid && membus.ready {
-                let offset: logic<12> = membus.addr[11:0];
-                let bi    : logic<3>  = membus.addr[2:0];
+            if request_fire {
+                pending         = 1;
+                resp_data_saved = 0;
 
-                pending    = 1;
-                addr_saved = membus.addr;
-                wen_saved  = membus.wen;
-
-                if membus.wen {
-                    // THR write
-                    if offset == REG_RBR_THR {
-                        if membus.wmask[bi] && tx_fifo_wready {
-                            tx_fifo_wvalid = 1;
-                            tx_fifo_wdata  = case bi {
-                                0      : membus.wdata[7:0],
-                                1      : membus.wdata[15:8],
-                                2      : membus.wdata[23:16],
-                                3      : membus.wdata[31:24],
-                                4      : membus.wdata[39:32],
-                                5      : membus.wdata[47:40],
-                                6      : membus.wdata[55:48],
-                                7      : membus.wdata[63:56],
-                                default: 8'h00,
-                            };
+                if !membus.wen {
+                    if request_offset == REG_RBR_THR {
+                        if rx_fifo_rvalid {
+                            resp_data_saved = (rx_fifo_rdata as UIntX) << request_shift;
                         }
+                    } else if request_offset == REG_LSR {
+                        var lsr            : logic<8>;
+                        lsr             = 0;
+                        lsr[0]          = rx_fifo_rvalid;
+                        lsr[5]          = tx_fifo_wready;
+                        lsr[6]          = tx_data_ready && !tx_data_valid;
+                        resp_data_saved = (lsr as UIntX) << request_shift;
                     }
-                } else {
-                    // RBR
                 }
             }
         }
