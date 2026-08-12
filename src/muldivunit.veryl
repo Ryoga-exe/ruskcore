@@ -239,7 +239,7 @@ module mulunit #(
         low_zero = !low_nonzero;
     }
 
-    var add_count: logic<32>;
+    var add_count: logic<6>;
 
     always_ff {
         if_reset {
