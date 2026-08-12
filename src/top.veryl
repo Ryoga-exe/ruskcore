@@ -30,6 +30,7 @@ module top #(
     inst ram_membus     : membus_if::<RAM_DATA_WIDTH, RAM_ADDR_WIDTH>;
     inst rom_membus     : membus_if::<ROM_DATA_WIDTH, ROM_ADDR_WIDTH>;
     inst dbg_membus     : Membus;
+    inst gpu_membus     : Membus;
     inst i_membus       : membus_if::<ILEN, XLEN>; // for instruction fetch
     inst d_membus       : Membus; // for load/store
     inst d_membus_core  : core_data_if;
@@ -82,6 +83,17 @@ module top #(
         ram_membus: mmio_ram_membus,
         rom_membus: mmio_rom_membus,
         dbg_membus                 ,
+        gpu_membus                 ,
+    );
+
+    inst gpu: graphics_mmio (
+        clk                   ,
+        rst                   ,
+        membus    : gpu_membus,
+        link_ready            ,
+        link_sclk             ,
+        link_mosi             ,
+        link_cs_n             ,
     );
 
     inst ram: memory::<RAM_DATA_WIDTH, RAM_ADDR_WIDTH> #(
@@ -126,9 +138,20 @@ module top #(
         mmio_rom_membus.rdata  = rom_membus.rdata;
     }
 
-    inst amou: amounit ( clk, rst, slave: d_membus_core, master: d_membus );
+    inst amou: amounit (
+        clk                  ,
+        rst                  ,
+        slave : d_membus_core,
+        master: d_membus     ,
+    );
 
-    inst c: core ( clk, rst, i_membus, d_membus: d_membus_core, led );
+    inst c: core (
+        clk                    ,
+        rst                    ,
+        i_membus               ,
+        d_membus: d_membus_core,
+        led                    ,
+    );
 
     // debug IO
     always_ff {
@@ -150,7 +173,7 @@ module top #(
                         $display("test success!");
                     } else {
                         $display("test failed!");
-                        $error  ("wdata : %h", dbg_membus.wdata);
+                        $error("wdata : %h", dbg_membus.wdata);
                     }
                     $finish();
                 }
