@@ -310,8 +310,7 @@ module divunit #(
                     quotient = '1;
                     rvalid   = 1;
                 } else {
-                    state  = State::SubLoop;
-                    rvalid = 0;
+                    state = State::SubLoop;
                 }
                 State::SubLoop  : {
                     if sub_count == WIDTH - 1 {
