@@ -43,6 +43,30 @@ module graphics_mmio (
         }
     }
     let ready: logic = ready_sync[2];
+    var state               : TxState    ;
+    var active_command      : logic  <8> ;
+    var command_arg         : logic  <8> ;
+    var byte_index          : logic  <4> ;
+    var bit_index           : logic  <3> ;
+    var half_count          : logic  <16>;
+    var low_guard           : logic  <8> ;
+    var current_byte        : logic  <8> ;
+    var load_pending        : logic      ;
+    var upload_x            : logic  <16>;
+    var upload_y            : logic  <16>;
+    var data_byte_index     : logic  <2> ;
+    var palette_entries_left: logic  <16>;
+    var palette_channel     : logic  <2> ;
+
+    var data_word : logic<32>;
+    var data_valid: logic    ;
+    var error     : logic    ;
+
+    var response_pending: logic                   ;
+    var response_rdata  : logic<MEMBUS_DATA_WIDTH>;
+
+    let register_index: logic<3>  = membus.addr[4:2];
+    let write_data32  : logic<32> = if membus.addr[2] ? membus.wdata[63:32] : membus.wdata[31:0];
     let busy          : logic     = state != TxState::Idle;
     let stream_command: logic     = active_command == OP_UPLOAD_RECT || active_command == OP_SET_PALETTE;
     let data_ready    : logic     = busy && stream_command && !data_valid;
