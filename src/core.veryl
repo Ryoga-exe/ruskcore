@@ -668,14 +668,14 @@ module core (
             wb_trace_id   = 0;
             util::konata_init();
         } else {
-            if !control_hazard && if_is_requested && i_membus.rvalid {
+            if !fetch_redirect && if_is_requested && i_membus.rvalid {
                 util::konata_stage(0, trace_next_id, if_pc_requested, i_membus.rdata);
                 trace_next_id += 1;
             }
-            if !control_hazard && if_fifo_wvalid && if_fifo_wready {
+            if !fetch_redirect && if_fifo_wvalid && if_fifo_wready {
                 util::konata_stage(1, if_trace_wdata, if_fifo_wdata.addr, if_fifo_wdata.bits);
             }
-            if !control_hazard && if_fifo_rvalid && if_fifo_rready {
+            if !control_hazard && !mispredicted && if_fifo_rvalid && if_fifo_rready {
                 util::konata_stage(2, id_trace_id, if_fifo_rdata.addr, if_fifo_rdata.bits);
                 ex_trace_id = id_trace_id;
             }
@@ -691,6 +691,10 @@ module core (
 
             if control_hazard {
                 util::konata_flush(mem_trace_id);
+            } else if mispredicted {
+                util::konata_flush(ex_trace_id);
+            } else if ids_prediction_redirect {
+                util::konata_flush(id_trace_id);
             }
             if wbq_rvalid && wbq_rready {
                 util::konata_retire(wb_trace_id, wbq_rdata.raise_trap);
