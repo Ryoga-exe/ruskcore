@@ -17,11 +17,11 @@ module bpunit (
 
     var pht: logic<2> [2 ** HISTORY_WIDTH];
 
-    let ids_index = ids_pc[3+:8];
-    let exs_index = exs_pc[3+:8];
+    let ids_index = ids_pc[2+:8];
+    let exs_index = exs_pc[2+:8];
 
     always_comb {
-        ids_predict_taken = pht[ids_index] >= 2'b10;
+        ids_predict_taken = pht[ids_index][1];
     }
 
     always_ff {

@@ -143,6 +143,9 @@ module core (
     var ids_ctrl      : InstCtrl;
     var ids_imm       : UIntX   ;
 
+    // branch prediction
+    var predict_taken: logic;
+
     inst decoder: inst_decoder (
         bits : ids_inst_bits ,
         valid: ids_inst_valid,
@@ -310,6 +313,12 @@ module core (
         op2   : exs_op2        ,
         take  : exs_brunit_take,
     );
+
+    // branch prediction
+    let bp_update_valid: logic = exs_valid && inst_is_br(exs_ctrl);
+    let bp_update_taken: logic = exs_brunit_take;
+
+    let mispredicted: logic = bp_update_valid && exs_predited_taken != exs_brunit_take;
 
     let exs_stall: logic = exs_mem_data_hazard || exs_muldiv_stall;
 
@@ -527,6 +536,19 @@ module core (
         // WB -> END
         wbq_rready = 1;
     }
+
+    // ====================================================
+    // * Branch Predictor
+    // ====================================================
+    inst bpu: bpunit (
+        clk                               ,
+        rst                               ,
+        ids_pc                            ,
+        ids_predict_taken: predict_taken  ,
+        exs_pc                            ,
+        exs_update_valid : bp_update_valid,
+        exs_update_taken : bp_update_taken,
+    );
 
     // ====================================================
     // * FIFO
