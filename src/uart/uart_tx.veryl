@@ -1,4 +1,4 @@
-// ref: https://github.com/sipeed/TangNano-20K-example/blob/main/uart/src/uart_rx.v
+// ref: https://github.com/sipeed/TangNano-20K-example/blob/main/uart/src/uart_tx.v
 module uart_tx #(
     param CLK_FRE  : u32 = 50    , //clock frequency(Mhz)
     param BAUD_RATE: u32 = 115200, //serial baud rate
@@ -27,7 +27,9 @@ module uart_tx #(
     var tx_data_latch: logic<8> ; // latch data to send
     var tx_reg       : logic    ;
 
-    assign tx_pin = tx_reg;
+    assign tx_pin        = tx_reg;
+    assign tx_data_ready = state == State::Idle;
+    let tx_fire: logic = tx_data_valid && tx_data_ready;
 
     always_ff {
         if_reset {
@@ -39,7 +41,7 @@ module uart_tx #(
 
     always_comb {
         next_state = case state {
-            State::Idle    : if tx_data_valid == 1'b1 ? State::Start : State::Idle,
+            State::Idle    : if tx_fire ? State::Start : State::Idle,
             State::Start   : if cycle_cnt == CYCLE - 1 ? State::SendByte : State::Start,
             State::SendByte: if cycle_cnt == CYCLE - 1 && bit_cnt == 7 ? State::Stop : State::SendByte,
             State::Stop    : if cycle_cnt == CYCLE - 1 ? State::Idle : State::Stop,
@@ -49,22 +51,8 @@ module uart_tx #(
 
     always_ff {
         if_reset {
-            tx_data_ready = 0;
-        } else if state == State::Idle {
-            if tx_data_valid {
-                tx_data_ready = 0;
-            } else {
-                tx_data_ready = 1;
-            }
-        } else if state == State::Stop && cycle_cnt == CYCLE - 1 {
-            tx_data_ready = 1;
-        }
-    }
-
-    always_ff {
-        if_reset {
             tx_data_latch = 0;
-        } else if state == State::Idle && tx_data_valid {
+        } else if tx_fire {
             tx_data_latch = tx_data;
         }
     }
