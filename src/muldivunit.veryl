@@ -96,7 +96,7 @@ module muldivunit (
     var du_signed_error   : logic;
     always_comb {
         if is_op32 {
-            du_signed_overflow = !funct3[0] && op1[31] == 1 && op1[31:0] == 0 && &op2[31:0];
+            du_signed_overflow = !funct3[0] && op1[31] == 1 && op1[31 - 1:0] == 0 && &op2[31:0];
             du_signed_divzero  = !funct3[0] && op2[31:0] == 0;
         } else {
             du_signed_overflow = !funct3[0] && op1[msb] == 1 && op1[msb - 1:0] == 0 && &op2;
