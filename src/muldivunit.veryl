@@ -272,7 +272,6 @@ module divunit #(
         Idle,
         ZeroCheck,
         SubLoop,
-        Finish,
     }
 
     var state: State;
@@ -281,7 +280,6 @@ module divunit #(
     var divisor_saved : logic<WIDTH * 2>;
 
     always_comb {
-        rvalid    = state == State::Finish;
         remainder = dividend_saved[WIDTH - 1:0];
     }
 
@@ -294,6 +292,7 @@ module divunit #(
             sub_count      = 0;
             dividend_saved = 0;
             divisor_saved  = 0;
+            rvalid         = 0;
         } else {
             case state {
                 State::Idle     : if valid {
@@ -302,16 +301,21 @@ module divunit #(
                     divisor_saved  = {1'b0, divisor, 1'b0 repeat WIDTH - 1};
                     quotient       = 0;
                     sub_count      = 0;
+                    rvalid         = 0;
                 }
                 State::ZeroCheck: if divisor_saved == 0 {
-                    state    = State::Finish;
+                    state    = State::Idle;
                     quotient = '1;
+                    rvalid   = 1;
                 } else {
-                    state = State::SubLoop;
+                    state  = State::SubLoop;
+                    rvalid = 0;
                 }
-                State::SubLoop  : if sub_count == WIDTH {
-                    state = State::Finish;
-                } else {
+                State::SubLoop  : {
+                    if sub_count == WIDTH - 1 {
+                        state  = State::Idle;
+                        rvalid = 1;
+                    }
                     if dividend_saved >= divisor_saved {
                         dividend_saved -= divisor_saved;
                         quotient       =  (quotient << 1) + 1;
@@ -321,8 +325,7 @@ module divunit #(
                     divisor_saved >>= 1;
                     sub_count     +=  1;
                 }
-                State::Finish   : state = State::Idle;
-                default         : {}
+                default: {}
             }
         }
     }
