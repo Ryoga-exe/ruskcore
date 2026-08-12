@@ -12,6 +12,10 @@ module top #(
     clk          : input  clock,
     rst          : input  reset,
     led          : output UIntX,
+    link_ready   : input  logic,
+    link_sclk    : output logic,
+    link_mosi    : output logic,
+    link_cs_n    : output logic,
 ) {
     // address to memory address in data units
     function addr_to_memaddr::<DATA_WIDTH: u32, ADDR_WIDTH: u32> (
