@@ -26,6 +26,9 @@ module muldivunit (
     var op1sign_saved: logic   ;
     var op2sign_saved: logic   ;
 
+    var op1_saved: UIntX;
+    var op2_saved: UIntX;
+
     // utils
     function abs::<WIDTH: u32> (
         value: input logic<WIDTH>,
@@ -47,16 +50,19 @@ module muldivunit (
     var mu_rvalid: logic               ;
     var mu_result: logic<MUL_RES_WIDTH>;
 
-    let mu_op1: logic<MUL_OP_WIDTH> = case funct3[1:0] {
-        2'b00, 2'b01, 2'b10: abs::<XLEN>(if is_op32 ? sext::<32, XLEN>(op1[31:0]) : op1), // MUL, MULH, MULHSU, MULW
-        2'b11              : op1, // MULHU
-        default            : 0,
-    };
-    let mu_op2: logic<MUL_OP_WIDTH> = case funct3[1:0] {
-        2'b00, 2'b01: abs::<XLEN>(if is_op32 ? sext::<32, XLEN>(op2[31:0]) : op2), // MUL, MULH, MULW
-        2'b11, 2'b10: op2, // MULHU, MULHSU
-        default     : 0,
-    };
+    let mu_op1: logic<MUL_OP_WIDTH> = op1;
+    let mu_op2: logic<MUL_OP_WIDTH> = op2;
+
+    // let mu_op1: logic<MUL_OP_WIDTH> = case funct3[1:0] {
+    //     2'b00, 2'b01, 2'b10: abs::<XLEN>(if is_op32 ? sext::<32, XLEN>(op1[31:0]) : op1), // MUL, MULH, MULHSU, MULW
+    //     2'b11              : op1, // MULHU
+    //     default            : 0,
+    // };
+    // let mu_op2: logic<MUL_OP_WIDTH> = case funct3[1:0] {
+    //     2'b00, 2'b01: abs::<XLEN>(if is_op32 ? sext::<32, XLEN>(op2[31:0]) : op2), // MUL, MULH, MULW
+    //     2'b11, 2'b10: op2, // MULHU, MULHSU
+    //     default     : 0,
+    // };
 
     inst mu: mulunit #(
         WIDTH: MUL_OP_WIDTH,
@@ -132,6 +138,9 @@ module muldivunit (
             is_op32_saved = 0;
             op1sign_saved = 0;
             op2sign_saved = 0;
+
+            op1_saved = 0;
+            op2_saved = 0;
         } else {
             case state {
                 State::Idle     : if ready && valid {
@@ -139,6 +148,10 @@ module muldivunit (
                     is_op32_saved = is_op32;
                     op1sign_saved = if is_op32 ? op1[31] : op1[msb];
                     op2sign_saved = if is_op32 ? op2[31] : op2[msb];
+
+                    op1_saved = op1;
+                    op2_saved = op2;
+
                     if is_mul {
                         state = State::WaitValid;
                     } else {
@@ -159,19 +172,15 @@ module muldivunit (
                     }
                 }
                 State::WaitValid: if is_mul && mu_rvalid {
-                    let res_signed: logic<MUL_RES_WIDTH> = if op1sign_saved != op2sign_saved ?
-                        ~mu_result + 1
-                    :
-                        mu_result
-                    ;
-                    let res_mulhsu: logic<MUL_RES_WIDTH> = if op1sign_saved == 1 ? ~mu_result + 1 : mu_result;
+                    let mul_lo = mu_result[0+:XLEN];
+                    let mul_hi = mu_result[XLEN+:XLEN];
 
                     state  = State::Finish;
                     result = case funct3_saved[1:0] {
-                        2'b00  : if is_op32_saved ? sext::<32, 64>(res_signed[31:0]) : res_signed[XLEN - 1:0], // MUL, MULW
-                        2'b01  : res_signed[XLEN+:XLEN], // MULH
-                        2'b10  : res_mulhsu[XLEN+:XLEN], // MULHSU
-                        2'b11  : mu_result[XLEN+:XLEN], // MULHU
+                        2'b00  : if is_op32_saved ? sext::<32, 64>(mul_lo[31:0]) : mul_lo, // MUL, MULW
+                        2'b01  : mul_hi - (if op1sign_saved ? op2_saved : 0) - (if op2sign_saved ? op1_saved : 0), // MULH
+                        2'b10  : mul_hi - (if op1sign_saved ? op2_saved : 0), // MULHSU
+                        2'b11  : mul_hi, // MULHU
                         default: 0,
                     };
                 } else if !is_mul && du_rvalid {
