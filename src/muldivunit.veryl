@@ -40,12 +40,12 @@ module muldivunit (
     }
 
     // multiply unit
-    const MUL_OP_WIDTH : u32 = XLEN;
-    const MUL_RES_WIDTH: u32 = MUL_OP_WIDTH * 2;
+    const MUL_OP_WIDTH: u32 = XLEN;
 
-    let is_mul   : logic                = if state == State::Idle ? !funct3[2] : !funct3_saved[2];
-    var mu_rvalid: logic               ;
-    var mu_result: logic<MUL_RES_WIDTH>;
+    let is_mul     : logic       = if state == State::Idle ? !funct3[2] : !funct3_saved[2];
+    var mu_rvalid  : logic      ;
+    var mu_result  : logic<XLEN>;
+    var mu_low_zero: logic      ;
 
     let mu_op1: logic<MUL_OP_WIDTH> = case funct3[1:0] {
         2'b00, 2'b01, 2'b10: abs::<XLEN>(if is_op32 ? sext::<32, XLEN>(op1[31:0]) : op1), // MUL, MULH, MULHSU, MULW
@@ -57,17 +57,20 @@ module muldivunit (
         2'b11, 2'b10: op2, // MULHU, MULHSU
         default     : 0,
     };
+    let mu_high: logic = funct3[1:0] != 2'b00;
 
     inst mu: mulunit #(
         WIDTH: MUL_OP_WIDTH,
     ) (
-        clk                             ,
-        rst                             ,
-        valid : ready && valid && is_mul,
-        op1   : mu_op1                  ,
-        op2   : mu_op2                  ,
-        rvalid: mu_rvalid               ,
-        result: mu_result               ,
+        clk                               ,
+        rst                               ,
+        valid   : ready && valid && is_mul,
+        op1     : mu_op1                  ,
+        op2     : mu_op2                  ,
+        high    : mu_high                 ,
+        rvalid  : mu_rvalid               ,
+        result  : mu_result               ,
+        low_zero: mu_low_zero             ,
     );
 
     // divider unit
@@ -139,6 +142,7 @@ module muldivunit (
                     is_op32_saved = is_op32;
                     op1sign_saved = if is_op32 ? op1[31] : op1[msb];
                     op2sign_saved = if is_op32 ? op2[31] : op2[msb];
+
                     if is_mul {
                         state = State::WaitValid;
                     } else {
@@ -159,19 +163,21 @@ module muldivunit (
                     }
                 }
                 State::WaitValid: if is_mul && mu_rvalid {
-                    let res_signed: logic<MUL_RES_WIDTH> = if op1sign_saved != op2sign_saved ?
-                        ~mu_result + 1
+                    let negate_carry  : logic<XLEN> = if funct3_saved[1:0] == 2'b00 ?
+                        1
                     :
-                        mu_result
+                        {1'b0 repeat XLEN - 1, mu_low_zero}
                     ;
-                    let res_mulhsu: logic<MUL_RES_WIDTH> = if op1sign_saved == 1 ? ~mu_result + 1 : mu_result;
+                    let negated_result: logic<XLEN> = ~mu_result + negate_carry;
+                    let res_signed    : logic<XLEN> = if op1sign_saved != op2sign_saved ? negated_result : mu_result;
+                    let res_mulhsu    : logic<XLEN> = if op1sign_saved ? negated_result : mu_result;
 
                     state  = State::Finish;
                     result = case funct3_saved[1:0] {
-                        2'b00  : if is_op32_saved ? sext::<32, 64>(res_signed[31:0]) : res_signed[XLEN - 1:0], // MUL, MULW
-                        2'b01  : res_signed[XLEN+:XLEN], // MULH
-                        2'b10  : res_mulhsu[XLEN+:XLEN], // MULHSU
-                        2'b11  : mu_result[XLEN+:XLEN], // MULHU
+                        2'b00  : if is_op32_saved ? sext::<32, 64>(res_signed[31:0]) : res_signed, // MUL, MULW
+                        2'b01  : res_signed, // MULH
+                        2'b10  : res_mulhsu, // MULHSU
+                        2'b11  : mu_result, // MULHU
                         default: 0,
                     };
                 } else if !is_mul && du_rvalid {
@@ -200,15 +206,17 @@ module muldivunit (
 }
 
 module mulunit #(
-    param WIDTH: u32 = 0,
+    param WIDTH: u32 = XLEN,
 ) (
-    clk   : input  clock           ,
-    rst   : input  reset           ,
-    valid : input  logic           ,
-    op1   : input  logic<WIDTH>    ,
-    op2   : input  logic<WIDTH>    ,
-    rvalid: output logic           ,
-    result: output logic<WIDTH * 2>,
+    clk     : input  clock       ,
+    rst     : input  reset       ,
+    valid   : input  logic       ,
+    op1     : input  logic<WIDTH>,
+    op2     : input  logic<WIDTH>,
+    high    : input  logic       ,
+    rvalid  : output logic       ,
+    result  : output logic<WIDTH>,
+    low_zero: output logic       ,
 ) {
     enum State {
         Idle,
@@ -217,40 +225,72 @@ module mulunit #(
 
     var state: State;
 
-    var op1zext: logic<WIDTH * 2>;
-    var op2zext: logic<WIDTH * 2>;
+    const BOOTH_WIDTH: u32 = WIDTH + 2;
+    const ACC_WIDTH  : u32 = BOOTH_WIDTH + 2;
+    const ITERATIONS : u32 = BOOTH_WIDTH / 2;
 
-    var add_count: logic<32>;
+    var accumulator        : logic<ACC_WIDTH>  ;
+    var next_accumulator   : logic<ACC_WIDTH>  ;
+    var shifted_accumulator: logic<ACC_WIDTH>  ;
+    var multiplicand       : logic<ACC_WIDTH>  ;
+    var multiplier         : logic<BOOTH_WIDTH>;
+    var shifted_multiplier : logic<BOOTH_WIDTH>;
+    var previous_bit       : logic             ;
+    var high_saved         : logic             ;
+
+    let product: logic<BOOTH_WIDTH * 2> = {shifted_accumulator[0+:BOOTH_WIDTH], shifted_multiplier};
+
+    always_comb {
+        next_accumulator = accumulator;
+        case {multiplier[1:0], previous_bit} {
+            3'b001, 3'b010: next_accumulator += multiplicand;
+            3'b011        : next_accumulator += multiplicand << 1;
+            3'b100        : next_accumulator -= multiplicand << 1;
+            3'b101, 3'b110: next_accumulator -= multiplicand;
+            default       : {}
+        }
+        shifted_accumulator = {next_accumulator[msb] repeat 2, next_accumulator[ACC_WIDTH - 1:2]};
+        shifted_multiplier  = {next_accumulator[1:0], multiplier[BOOTH_WIDTH - 1:2]};
+    }
+
+    var add_count: logic<6>;
 
     always_ff {
         if_reset {
-            state     = State::Idle;
-            result    = 0;
-            add_count = 0;
-            op1zext   = 0;
-            op2zext   = 0;
-            rvalid    = 0;
+            state        = State::Idle;
+            add_count    = 0;
+            accumulator  = 0;
+            multiplicand = 0;
+            multiplier   = 0;
+            previous_bit = 0;
+            high_saved   = 0;
+            rvalid       = 0;
+            result       = 0;
+            low_zero     = 0;
         } else {
             rvalid = 0; // default
             case state {
                 State::Idle   : if valid {
-                    state     = State::AddLoop;
-                    result    = 0;
-                    add_count = 0;
-                    op1zext   = {1'b0 repeat WIDTH, op1};
-                    op2zext   = {1'b0 repeat WIDTH, op2};
+                    state        = State::AddLoop;
+                    add_count    = 0;
+                    accumulator  = 0;
+                    multiplicand = {1'b0 repeat ACC_WIDTH - WIDTH, op1};
+                    multiplier   = {2'b00, op2};
+                    previous_bit = 0;
+                    high_saved   = high;
                 }
                 State::AddLoop: {
-                    if add_count == WIDTH - 1 {
-                        state  = State::Idle;
-                        rvalid = 1;
-                    }
+                    accumulator  = shifted_accumulator;
+                    multiplier   = shifted_multiplier;
+                    previous_bit = multiplier[1];
 
-                    if op2zext[add_count] {
-                        result += op1zext;
+                    if add_count == ITERATIONS[0+:6] - 1 {
+                        state    = State::Idle;
+                        rvalid   = 1;
+                        result   = if high_saved ? product[WIDTH+:WIDTH] : product[0+:WIDTH];
+                        low_zero = product[0+:WIDTH] == 0;
                     }
-                    op1zext   <<= 1;
-                    add_count +=  1;
+                    add_count += 1;
                 }
                 default: {}
             }
@@ -310,8 +350,7 @@ module divunit #(
                     quotient = '1;
                     rvalid   = 1;
                 } else {
-                    state  = State::SubLoop;
-                    rvalid = 0;
+                    state = State::SubLoop;
                 }
                 State::SubLoop  : {
                     if sub_count == WIDTH - 1 {
