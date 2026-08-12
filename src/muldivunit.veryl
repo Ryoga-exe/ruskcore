@@ -26,6 +26,9 @@ module muldivunit (
     var op1sign_saved: logic   ;
     var op2sign_saved: logic   ;
 
+    var op1_saved: UIntX;
+    var op2_saved: UIntX;
+
     // utils
     function abs::<WIDTH: u32> (
         value: input logic<WIDTH>,
@@ -47,16 +50,8 @@ module muldivunit (
     var mu_rvalid: logic               ;
     var mu_result: logic<MUL_RES_WIDTH>;
 
-    let mu_op1: logic<MUL_OP_WIDTH> = case funct3[1:0] {
-        2'b00, 2'b01, 2'b10: abs::<XLEN>(if is_op32 ? sext::<32, XLEN>(op1[31:0]) : op1), // MUL, MULH, MULHSU, MULW
-        2'b11              : op1, // MULHU
-        default            : 0,
-    };
-    let mu_op2: logic<MUL_OP_WIDTH> = case funct3[1:0] {
-        2'b00, 2'b01: abs::<XLEN>(if is_op32 ? sext::<32, XLEN>(op2[31:0]) : op2), // MUL, MULH, MULW
-        2'b11, 2'b10: op2, // MULHU, MULHSU
-        default     : 0,
-    };
+    let mu_op1: logic<MUL_OP_WIDTH> = op1;
+    let mu_op2: logic<MUL_OP_WIDTH> = op2;
 
     inst mu: mulunit #(
         WIDTH: MUL_OP_WIDTH,
@@ -96,7 +91,7 @@ module muldivunit (
     var du_signed_error   : logic;
     always_comb {
         if is_op32 {
-            du_signed_overflow = !funct3[0] && op1[31] == 1 && op1[31:0] == 0 && &op2[31:0];
+            du_signed_overflow = !funct3[0] && op1[31] == 1 && op1[31 - 1:0] == 0 && &op2[31:0];
             du_signed_divzero  = !funct3[0] && op2[31:0] == 0;
         } else {
             du_signed_overflow = !funct3[0] && op1[msb] == 1 && op1[msb - 1:0] == 0 && &op2;
@@ -132,6 +127,9 @@ module muldivunit (
             is_op32_saved = 0;
             op1sign_saved = 0;
             op2sign_saved = 0;
+
+            op1_saved = 0;
+            op2_saved = 0;
         } else {
             case state {
                 State::Idle     : if ready && valid {
@@ -140,13 +138,20 @@ module muldivunit (
                     op1sign_saved = if is_op32 ? op1[31] : op1[msb];
                     op2sign_saved = if is_op32 ? op2[31] : op2[msb];
 
+                    op1_saved = op1;
+                    op2_saved = op2;
+
                     if is_mul {
                         state = State::WaitValid;
                     } else {
                         // div ad-hoc proc
                         if du_signed_overflow {
                             state  = State::Finish;
-                            result = if funct3[1] ? 0 : {1'b1, 1'b0 repeat XLEN - 1}; // REM : DIV
+                            result = if funct3[1] ?
+                                0
+                            :
+                                (if is_op32 ? sext::<32, XLEN>(op1[31:0]) : {1'b1, 1'b0 repeat XLEN - 1})
+                            ; // REM : DIV
                         } else if du_signed_divzero {
                             state  = State::Finish;
                             result = if funct3[1] ? (if is_op32 ? sext::<32, 64>(op1[31:0]) : op1) : '1; // REM : DIV
@@ -156,19 +161,15 @@ module muldivunit (
                     }
                 }
                 State::WaitValid: if is_mul && mu_rvalid {
-                    let res_signed: logic<MUL_RES_WIDTH> = if op1sign_saved != op2sign_saved ?
-                        ~mu_result + 1
-                    :
-                        mu_result
-                    ;
-                    let res_mulhsu: logic<MUL_RES_WIDTH> = if op1sign_saved == 1 ? ~mu_result + 1 : mu_result;
+                    let mul_lo = mu_result[0+:XLEN];
+                    let mul_hi = mu_result[XLEN+:XLEN];
 
                     state  = State::Finish;
                     result = case funct3_saved[1:0] {
-                        2'b00  : if is_op32_saved ? sext::<32, 64>(res_signed[31:0]) : res_signed[XLEN - 1:0], // MUL. MULW
-                        2'b01  : res_signed[XLEN+:XLEN], // MULH
-                        2'b10  : res_mulhsu[XLEN+:XLEN], // MULHSU
-                        2'b11  : mu_result[XLEN+:XLEN], // MULHU
+                        2'b00  : if is_op32_saved ? sext::<32, 64>(mul_lo[31:0]) : mul_lo, // MUL, MULW
+                        2'b01  : mul_hi - (if op1sign_saved ? op2_saved : 0) - (if op2sign_saved ? op1_saved : 0), // MULH
+                        2'b10  : mul_hi - (if op1sign_saved ? op2_saved : 0), // MULHSU
+                        2'b11  : mul_hi, // MULHU
                         default: 0,
                     };
                 } else if !is_mul && du_rvalid {
@@ -210,17 +211,12 @@ module mulunit #(
     enum State {
         Idle,
         AddLoop,
-        Finish,
     }
 
     var state: State;
 
     var op1zext: logic<WIDTH * 2>;
     var op2zext: logic<WIDTH * 2>;
-
-    always_comb {
-        rvalid = (state == State::Finish);
-    }
 
     var add_count: logic<32>;
 
@@ -231,6 +227,7 @@ module mulunit #(
             add_count = 0;
             op1zext   = 0;
             op2zext   = 0;
+            rvalid    = 0;
         } else {
             case state {
                 State::Idle   : if valid {
@@ -239,18 +236,21 @@ module mulunit #(
                     add_count = 0;
                     op1zext   = {1'b0 repeat WIDTH, op1};
                     op2zext   = {1'b0 repeat WIDTH, op2};
+                    rvalid    = 0;
                 }
-                State::AddLoop: if add_count == WIDTH {
-                    state = State::Finish;
-                } else {
+                State::AddLoop: {
+                    if add_count == WIDTH - 1 {
+                        state  = State::Idle;
+                        rvalid = 1;
+                    }
+
                     if op2zext[add_count] {
                         result += op1zext;
                     }
                     op1zext   <<= 1;
                     add_count +=  1;
                 }
-                State::Finish : state = State::Idle;
-                default       : {}
+                default: {}
             }
         }
     }
@@ -272,7 +272,6 @@ module divunit #(
         Idle,
         ZeroCheck,
         SubLoop,
-        Finish,
     }
 
     var state: State;
@@ -281,7 +280,6 @@ module divunit #(
     var divisor_saved : logic<WIDTH * 2>;
 
     always_comb {
-        rvalid    = state == State::Finish;
         remainder = dividend_saved[WIDTH - 1:0];
     }
 
@@ -294,6 +292,7 @@ module divunit #(
             sub_count      = 0;
             dividend_saved = 0;
             divisor_saved  = 0;
+            rvalid         = 0;
         } else {
             case state {
                 State::Idle     : if valid {
@@ -302,16 +301,21 @@ module divunit #(
                     divisor_saved  = {1'b0, divisor, 1'b0 repeat WIDTH - 1};
                     quotient       = 0;
                     sub_count      = 0;
+                    rvalid         = 0;
                 }
                 State::ZeroCheck: if divisor_saved == 0 {
-                    state    = State::Finish;
+                    state    = State::Idle;
                     quotient = '1;
+                    rvalid   = 1;
                 } else {
-                    state = State::SubLoop;
+                    state  = State::SubLoop;
+                    rvalid = 0;
                 }
-                State::SubLoop  : if sub_count == WIDTH {
-                    state = State::Finish;
-                } else {
+                State::SubLoop  : {
+                    if sub_count == WIDTH - 1 {
+                        state  = State::Idle;
+                        rvalid = 1;
+                    }
                     if dividend_saved >= divisor_saved {
                         dividend_saved -= divisor_saved;
                         quotient       =  (quotient << 1) + 1;
@@ -321,8 +325,7 @@ module divunit #(
                     divisor_saved >>= 1;
                     sub_count     +=  1;
                 }
-                State::Finish   : state = State::Idle;
-                default         : {}
+                default: {}
             }
         }
     }
