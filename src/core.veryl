@@ -102,15 +102,19 @@ module core (
                     if i_membus.rvalid {
                         if_is_requested = i_membus.ready && i_membus.valid;
                         if i_membus.ready && i_membus.valid {
-                            if_pc           = if_pc_next;
-                            if_pc_requested = if_pc;
+                            if_pc                         = if_predicted_pc_next;
+                            if_pc_requested               = if_pc;
+                            if_predicted_taken_requested  = if_predict_taken;
+                            if_predicted_target_requested = if_predict_target;
                         }
                     }
                 } else {
                     if i_membus.ready && i_membus.valid {
-                        if_is_requested = 1;
-                        if_pc           = if_pc_next;
-                        if_pc_requested = if_pc;
+                        if_is_requested               = 1;
+                        if_pc                         = if_predicted_pc_next;
+                        if_pc_requested               = if_pc;
+                        if_predicted_taken_requested  = if_predict_taken;
+                        if_predicted_target_requested = if_predict_target;
                     }
                 }
             }
@@ -131,9 +135,11 @@ module core (
                 if_fifo_wvalid = 0;
             } else {
                 if if_is_requested && i_membus.rvalid {
-                    if_fifo_wvalid     = 1;
-                    if_fifo_wdata.addr = if_pc_requested;
-                    if_fifo_wdata.bits = i_membus.rdata;
+                    if_fifo_wvalid                 = 1;
+                    if_fifo_wdata.addr             = if_pc_requested;
+                    if_fifo_wdata.bits             = i_membus.rdata;
+                    if_fifo_wdata.predicted_taken  = if_predicted_taken_requested;
+                    if_fifo_wdata.predicted_target = if_predicted_target_requested;
                     #[ifdef(KONATA_TRACE)]
                     block {
                         if_trace_wdata = trace_next_id;
@@ -158,14 +164,6 @@ module core (
     var ids_ctrl      : InstCtrl;
     var ids_imm       : UIntX   ;
 
-    // branch prediction
-    var predict_taken      : logic;
-    let ids_predicted_taken: logic = ids_valid && ids_inst_valid && inst_is_br(ids_ctrl) && predict_taken;
-
-    // redirect
-    assign ids_prediction_redirect = ids_predicted_taken && if_fifo_rready && !control_hazard && !mispredicted;
-    assign ids_prediction_pc_next  = ids_pc + ids_imm;
-
     inst decoder: inst_decoder (
         bits : ids_inst_bits ,
         valid: ids_inst_valid,
@@ -175,13 +173,14 @@ module core (
 
     always_comb {
         // ID -> EX
-        if_fifo_rready            = exq_wready;
-        exq_wvalid                = if_fifo_rvalid;
-        exq_wdata.addr            = if_fifo_rdata.addr;
-        exq_wdata.bits            = if_fifo_rdata.bits;
-        exq_wdata.ctrl            = ids_ctrl;
-        exq_wdata.imm             = ids_imm;
-        exq_wdata.predicted_taken = ids_predicted_taken;
+        if_fifo_rready             = exq_wready;
+        exq_wvalid                 = if_fifo_rvalid;
+        exq_wdata.addr             = if_fifo_rdata.addr;
+        exq_wdata.bits             = if_fifo_rdata.bits;
+        exq_wdata.ctrl             = ids_ctrl;
+        exq_wdata.imm              = ids_imm;
+        exq_wdata.predicted_taken  = if_fifo_rdata.predicted_taken;
+        exq_wdata.predicted_target = if_fifo_rdata.predicted_target;
         // exception
         exq_wdata.expt = 0; // default
         if !ids_inst_valid {
@@ -340,11 +339,14 @@ module core (
     let exs_stall: logic = exs_mem_data_hazard || exs_muldiv_stall;
 
     // branch prediction
-    let bp_update_valid: logic = exs_valid && exq_rready && inst_is_br(exs_ctrl) && !control_hazard;
-    let bp_update_taken: logic = exs_brunit_take;
+    let exs_is_control_transfer: logic = inst_is_br(exs_ctrl) || exs_ctrl.is_jump;
+    let exs_actual_taken       : logic = exs_ctrl.is_jump || exs_brunit_take;
+    let exs_actual_target      : Addr  = if inst_is_br(exs_ctrl) ? exs_pc + exs_imm : exs_alu_result & ~1;
+    let bp_update_valid        : logic = exs_valid && exq_rready && exs_is_control_transfer && !control_hazard;
 
-    assign mispredicted         = bp_update_valid && exs_predicted_taken != exs_brunit_take;
-    assign mispredicted_pc_next = if exs_brunit_take ? exs_pc + exs_imm : exs_pc + 4;
+    assign mispredicted         = bp_update_valid
+        && (exs_predicted_taken != exs_actual_taken || exs_actual_taken && exs_predicted_target != exs_actual_target);
+    assign mispredicted_pc_next = if exs_actual_taken ? exs_actual_target : exs_pc + 4;
 
     always_comb {
         // EX -> MEM
@@ -474,7 +476,7 @@ module core (
     };
 
     // Hazard
-    assign control_hazard         = mems_valid && (csru_raise_trap || mems_ctrl.is_jump);
+    assign control_hazard         = mems_valid && csru_raise_trap;
     assign control_hazard_pc_next = if csru_raise_trap ? csru_trap_vector : memq_rdata.jump_addr;
 
     // Register Forwarding (MEM -> EX)
@@ -565,13 +567,16 @@ module core (
     // * Branch Predictor
     // ====================================================
     inst bpu: bpunit (
-        clk                               ,
-        rst                               ,
-        ids_pc                            ,
-        ids_predict_taken: predict_taken  ,
-        exs_pc                            ,
-        exs_update_valid : bp_update_valid,
-        exs_update_taken : bp_update_taken,
+        clk                                        ,
+        rst                                        ,
+        if_pc                                      ,
+        if_predict_taken                           ,
+        if_predict_target                          ,
+        exs_pc                                     ,
+        exs_update_valid        : bp_update_valid  ,
+        exs_update_taken        : exs_actual_taken ,
+        exs_update_target       : exs_actual_target,
+        exs_update_unconditional: exs_ctrl.is_jump ,
     );
 
     // ====================================================
@@ -694,8 +699,6 @@ module core (
                 util::konata_flush(mem_trace_id);
             } else if mispredicted {
                 util::konata_flush(ex_trace_id);
-            } else if ids_prediction_redirect {
-                util::konata_flush(id_trace_id);
             }
             if wbq_rvalid && wbq_rready {
                 util::konata_retire(wb_trace_id, wbq_rdata.raise_trap);
