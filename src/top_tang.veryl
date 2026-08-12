@@ -21,10 +21,10 @@ module top_tang #(
     }
 
     inst t: top #(
-        RAM_FILEPATH_IS_ENV: 0                     ,
-        RAM_FILEPATH       : "test/led_counter.hex",
-        ROM_FILEPATH_IS_ENV: 0                     ,
-        ROM_FILEPATH       : "bootrom.hex"         ,
+        RAM_FILEPATH_IS_ENV: 0                 ,
+        RAM_FILEPATH       : "test/zig/gpu.hex",
+        ROM_FILEPATH_IS_ENV: 0                 ,
+        ROM_FILEPATH       : "bootrom.hex"     ,
     ) (
         #[ifdef(TEST_MODE)]
         test_success : _       ,
