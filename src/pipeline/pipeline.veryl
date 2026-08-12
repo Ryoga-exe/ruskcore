@@ -8,17 +8,21 @@ package pipeline {
 
     // IF -> ID
     struct if_fifo_type {
-        addr: Addr,
-        bits: Inst,
+        addr            : Addr ,
+        bits            : Inst ,
+        predicted_taken : logic,
+        predicted_target: Addr ,
     }
 
     // ID -> EX
     struct exq_type {
-        addr: Addr         ,
-        bits: Inst         ,
-        ctrl: InstCtrl     ,
-        imm : UIntX        ,
-        expt: ExceptionInfo,
+        addr            : Addr         ,
+        bits            : Inst         ,
+        ctrl            : InstCtrl     ,
+        imm             : UIntX        ,
+        expt            : ExceptionInfo,
+        predicted_taken : logic        ,
+        predicted_target: Addr         ,
     }
 
     // EX -> MEM

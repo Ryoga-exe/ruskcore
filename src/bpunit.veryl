@@ -1,0 +1,60 @@
+import eei::*;
+
+/// Direct-mapped branch target buffer with a bimodal 2-bit predictor.
+// branch predictor
+// 2-bit bimodal
+module bpunit (
+    clk: input clock,
+    rst: input reset,
+    // from IF stage -> predict
+    if_pc            : input  Addr ,
+    if_predict_taken : output logic,
+    if_predict_target: output Addr ,
+    // from EX stage -> update
+    exs_pc                  : input Addr ,
+    exs_update_valid        : input logic,
+    exs_update_taken        : input logic,
+    exs_update_target       : input Addr ,
+    exs_update_unconditional: input logic,
+) {
+    const HISTORY_WIDTH: u32 = 5;
+    const ENTRY_COUNT  : u32 = 2 ** HISTORY_WIDTH;
+    const TAG_WIDTH    : u32 = XLEN - HISTORY_WIDTH - 2;
+
+    var valid_bits: logic<ENTRY_COUNT>              ;
+    var tags      : logic<TAG_WIDTH>   [ENTRY_COUNT];
+    var targets   : Addr               [ENTRY_COUNT];
+    var pht       : logic<2>           [ENTRY_COUNT];
+
+    let if_index : logic<HISTORY_WIDTH> = if_pc[2+:HISTORY_WIDTH];
+    let if_tag   : logic<TAG_WIDTH>     = if_pc[HISTORY_WIDTH + 2+:TAG_WIDTH];
+    let exs_index: logic<HISTORY_WIDTH> = exs_pc[2+:HISTORY_WIDTH];
+    let exs_tag  : logic<TAG_WIDTH>     = exs_pc[HISTORY_WIDTH + 2+:TAG_WIDTH];
+    let exs_hit  : logic                = valid_bits[exs_index] && tags[exs_index] == exs_tag;
+
+    always_comb {
+        if_predict_taken  = valid_bits[if_index] && tags[if_index] == if_tag && pht[if_index][1];
+        if_predict_target = targets[if_index];
+    }
+
+    #[allow(missing_reset_statement)]
+    always_ff {
+        if_reset {
+            valid_bits = 0;
+        } else if exs_update_valid {
+            valid_bits[exs_index] = 1;
+            tags[exs_index]       = exs_tag;
+            targets[exs_index]    = exs_update_target;
+
+            if exs_update_unconditional {
+                pht[exs_index] = 2'b11;
+            } else if !exs_hit {
+                pht[exs_index] = if exs_update_taken ? 2'b10 : 2'b01;
+            } else if exs_update_taken {
+                pht[exs_index] += if pht[exs_index] == 2'b11 ? 0 : 1;
+            } else {
+                pht[exs_index] -= if pht[exs_index] == 2'b00 ? 0 : 1;
+            }
+        }
+    }
+}
