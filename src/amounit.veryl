@@ -171,10 +171,10 @@ module amounit (
             }
             State::WaitValid                         : accept_request_comb();
             State::SCSuccess, State::SCFail          : accept_request_comb();
-            State::AMOLoadReady                      : assign_master      (req_saved.addr, 0, 0, 0);
+            State::AMOLoadReady                      : assign_master(req_saved.addr, 0, 0, 0);
             State::AMOLoadValid, State::AMOStoreReady: {
-                let rdata        : UIntX = if state == State::AMOLoadValid ? master.rdata : zaamo_fetched_data;
-                let wdata        : UIntX = gen_amo_wdata(req_saved, rdata);
+                let rdata: UIntX = if state == State::AMOLoadValid ? master.rdata : zaamo_fetched_data;
+                let wdata: UIntX = gen_amo_wdata(req_saved, rdata);
                 assign_master(req_saved.addr, 1, wdata, req_saved.wmask);
             }
             State::AMOStoreValid: accept_request_comb();

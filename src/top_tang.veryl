@@ -6,6 +6,11 @@ module top_tang #(
     clk: input  clock   ,
     rst: input  logic   ,
     led: output logic<6>,
+    // graphics
+    link_ready: input  logic,
+    link_sclk : output logic,
+    link_mosi : output logic,
+    link_cs_n : output logic,
 ) {
     let core_rst: reset = if RESET_ACTIVE_HIGH ? !rst : rst;
 
@@ -27,5 +32,9 @@ module top_tang #(
         clk                    ,
         rst          : core_rst,
         led          : led_top ,
+        link_ready             ,
+        link_sclk              ,
+        link_mosi              ,
+        link_cs_n              ,
     );
 }

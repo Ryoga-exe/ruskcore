@@ -30,7 +30,7 @@ add_file $cst
 add_file $sdc
 
 set init_dir [file join $project_dir "target"]
-foreach relpath {bootrom.hex test/led_counter.hex} {
+foreach relpath {bootrom.hex test/zig/gpu.hex} {
     set init_src [file join $project_dir $relpath]
     set init_dst [file join $init_dir $relpath]
 

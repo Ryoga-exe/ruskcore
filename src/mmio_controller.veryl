@@ -8,12 +8,14 @@ module mmio_controller (
     ram_membus: modport Membus::master,
     rom_membus: modport Membus::master,
     dbg_membus: modport Membus::master,
+    gpu_membus: modport Membus::master,
 ) {
     enum Device {
         UNKNOWN,
         RAM,
         ROM,
         DEBUG,
+        GRAPHICS,
     }
 
     struct Request {
@@ -57,6 +59,7 @@ module mmio_controller (
         reset_membus_master(ram_membus);
         reset_membus_master(rom_membus);
         reset_membus_master(dbg_membus);
+        reset_membus_master(gpu_membus);
     }
 
     // Get device from address
@@ -65,6 +68,9 @@ module mmio_controller (
     ) -> Device {
         if DBG_ADDR <= addr && addr <= DBG_ADDR + 7 {
             return Device::DEBUG;
+        }
+        if MMAP_GRAPHICS_BEGIN <= addr && addr <= MMAP_GRAPHICS_END {
+            return Device::GRAPHICS;
         }
         if MMAP_ROM_BEGIN <= addr && addr <= MMAP_ROM_END {
             return Device::ROM;
@@ -101,6 +107,13 @@ module mmio_controller (
                 dbg_membus.wdata = req.wdata;
                 dbg_membus.wmask = req.wmask;
             }
+            Device::GRAPHICS: {
+                gpu_membus.valid = req.valid;
+                gpu_membus.addr  = req.addr - MMAP_GRAPHICS_BEGIN;
+                gpu_membus.wen   = req.wen;
+                gpu_membus.wdata = req.wdata;
+                gpu_membus.wmask = req.wmask;
+            }
             default: {}
         }
     }
@@ -126,6 +139,10 @@ module mmio_controller (
                 req.rvalid = dbg_membus.rvalid;
                 req.rdata  = dbg_membus.rdata;
             }
+            Device::GRAPHICS: {
+                req.rvalid = gpu_membus.rvalid;
+                req.rdata  = gpu_membus.rdata;
+            }
             default: {}
         }
     }
@@ -135,10 +152,11 @@ module mmio_controller (
         device: input Device,
     ) -> logic {
         return case device {
-            Device::RAM  : ram_membus.ready,
-            Device::ROM  : rom_membus.ready,
-            Device::DEBUG: dbg_membus.ready,
-            default      : 1,
+            Device::RAM     : ram_membus.ready,
+            Device::ROM     : rom_membus.ready,
+            Device::DEBUG   : dbg_membus.ready,
+            Device::GRAPHICS: gpu_membus.ready,
+            default         : 1,
         };
     }
 
@@ -147,10 +165,11 @@ module mmio_controller (
         device: input Device,
     ) -> logic {
         return case device {
-            Device::RAM  : ram_membus.rvalid,
-            Device::ROM  : rom_membus.rvalid,
-            Device::DEBUG: dbg_membus.rvalid,
-            default      : 1,
+            Device::RAM     : ram_membus.rvalid,
+            Device::ROM     : rom_membus.rvalid,
+            Device::DEBUG   : dbg_membus.rvalid,
+            Device::GRAPHICS: gpu_membus.rvalid,
+            default         : 1,
         };
     }
 

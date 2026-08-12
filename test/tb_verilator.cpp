@@ -179,6 +179,7 @@ int main(int argc, char** argv) {
     // top
     Vruskcore_top* dut = new Vruskcore_top();
     dut->MMAP_DBG_ADDR = DBG_ADDR;
+    dut->link_ready = 1;
 
     // reset
     dut->clk = 0;
