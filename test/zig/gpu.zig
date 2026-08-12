@@ -1,62 +1,76 @@
-const base: usize = 0x1001_0000;
+const graphics = struct {
+    const regs = struct {
+        const base: u32 = 0x1001_0000;
+        const status: *volatile u32 = @ptrFromInt(base + 0x00);
+        const command: *volatile u32 = @ptrFromInt(base + 0x04);
+        const x: *volatile u32 = @ptrFromInt(base + 0x08);
+        const y: *volatile u32 = @ptrFromInt(base + 0x0c);
+        const w: *volatile u32 = @ptrFromInt(base + 0x10);
+        const h: *volatile u32 = @ptrFromInt(base + 0x14);
+        const color: *volatile u32 = @ptrFromInt(base + 0x18);
+        const data: *volatile u32 = @ptrFromInt(base + 0x1c);
+    };
 
-const status = reg(0x00);
-const command = reg(0x04);
-const x = reg(0x08);
-const y = reg(0x0c);
-const w = reg(0x10);
-const h = reg(0x14);
-const color = reg(0x18);
-const data = reg(0x1c);
+    const ops = struct {
+        const clear: u8 = 1;
+        const fill_rect: u8 = 2;
+        const set_pallete: u8 = 4;
+        const present: u8 = 5;
+    };
 
-const regs = struct {
-    pub const base: u32 = 0x1001_0000;
-    pub const status: *volatile u32 = @ptrFromInt(base + 0x00);
+    fn waitIdle() void {
+        while (regs.status.* & 1 == 0) {}
+    }
+
+    fn issue(op: u8, arg: u8) void {
+        regs.command.* = @as(u32, op) | (@as(u32, arg) << 8);
+    }
+
+    fn clear() void {
+        waitIdle();
+        regs.color.* = 0;
+        issue(ops.clear, 0);
+    }
+
+    fn fillRect(x: u32, y: u32, w: u32, h: u32, color: u8) void {
+        waitIdle();
+        regs.x.* = x;
+        regs.y.* = y;
+        regs.w.* = w;
+        regs.h.* = h;
+        regs.color.* = color;
+        issue(ops.fill_rect, 0);
+    }
+
+    fn present(frame: u8) void {
+        waitIdle();
+        issue(ops.present, frame);
+    }
 };
-
-const op = struct {
-    pub const clear: u8 = 1;
-    pub const fill_rect: u8 = 2;
-    pub const set_pallete: u8 = 4;
-    pub const present: u8 = 5;
-};
-
-fn reg(offset: usize) *volatile u32 {
-    return @ptrFromInt(base + offset);
-}
-
-fn waitIdle() void {
-    while (status.* & 1 == 0) {}
-}
-
-fn palette() void {
-    x.* = 0;
-    w.* = 2;
-    command.* = 4; // SET_PALETTE
-    data.* = 0x000000; // palette 0: black
-    data.* = 0xffffff; // palette 1: white
-}
-
-fn show(value: u8, frame: u8) void {
-    waitIdle();
-    color.* = value;
-    command.* = 1; // CLEAR
-
-    waitIdle();
-    command.* = @as(u32, frame) << 8 | 5; // PRESENT
-}
 
 pub export fn main() noreturn {
-    palette();
+    // set pallete
+    {
+        graphics.waitIdle();
 
-    waitIdle();
-    color.* = 0;
+        graphics.regs.x.* = 0;
+        graphics.regs.w.* = 4;
+        graphics.issue(graphics.ops.set_pallete, 0);
+        graphics.regs.data.* = 0x000000;
+        graphics.regs.data.* = 0xff0000;
+        graphics.regs.data.* = 0xffff00;
+        graphics.regs.data.* = 0xff00ff;
+    }
+
+    graphics.clear();
+    graphics.present(0);
+    graphics.clear();
+    graphics.present(1);
 
     var frame: u8 = 0;
     while (true) {
-        show(0, frame);
-        frame +%= 1;
-        show(1, frame);
+        graphics.fillRect(100, 100, 100, 100, 1);
+        graphics.present(frame);
         frame +%= 1;
     }
 }
