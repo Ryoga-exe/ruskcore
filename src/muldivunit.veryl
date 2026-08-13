@@ -255,9 +255,9 @@ module mulunit #(
 
     var state: State;
 
-    const BOOTH_WIDTH: u32 = WIDTH + 3 - WIDTH % 3;
-    const ACC_WIDTH  : u32 = BOOTH_WIDTH + 3;
-    const ITERATIONS : u32 = BOOTH_WIDTH / 3;
+    const BOOTH_WIDTH: u32 = WIDTH + 4 - WIDTH % 4;
+    const ACC_WIDTH  : u32 = BOOTH_WIDTH + 4;
+    const ITERATIONS : u32 = BOOTH_WIDTH / 4;
 
     let extended_op1: logic<ACC_WIDTH> = {1'b0 repeat ACC_WIDTH - WIDTH, op1};
 
@@ -266,6 +266,8 @@ module mulunit #(
     var shifted_accumulator: logic<ACC_WIDTH>  ;
     var multiplicand       : logic<ACC_WIDTH>  ;
     var multiplicand3      : logic<ACC_WIDTH>  ;
+    var multiplicand5      : logic<ACC_WIDTH>  ;
+    var multiplicand7      : logic<ACC_WIDTH>  ;
     var multiplier         : logic<BOOTH_WIDTH>;
     var shifted_multiplier : logic<BOOTH_WIDTH>;
     var previous_bit       : logic             ;
@@ -275,19 +277,27 @@ module mulunit #(
 
     always_comb {
         next_accumulator = accumulator;
-        case {multiplier[2:0], previous_bit} {
-            4'b0001, 4'b0010: next_accumulator += multiplicand;
-            4'b0011, 4'b0100: next_accumulator += multiplicand << 1;
-            4'b0101, 4'b0110: next_accumulator += multiplicand3;
-            4'b0111         : next_accumulator += multiplicand << 2;
-            4'b1000         : next_accumulator -= multiplicand << 2;
-            4'b1001, 4'b1010: next_accumulator -= multiplicand3;
-            4'b1011, 4'b1100: next_accumulator -= multiplicand << 1;
-            4'b1101, 4'b1110: next_accumulator -= multiplicand;
-            default         : {}
+        case {multiplier[3:0], previous_bit} {
+            5'b00001, 5'b00010: next_accumulator += multiplicand;
+            5'b00011, 5'b00100: next_accumulator += multiplicand << 1;
+            5'b00101, 5'b00110: next_accumulator += multiplicand3;
+            5'b00111, 5'b01000: next_accumulator += multiplicand << 2;
+            5'b01001, 5'b01010: next_accumulator += multiplicand5;
+            5'b01011, 5'b01100: next_accumulator += multiplicand3 << 1;
+            5'b01101, 5'b01110: next_accumulator += multiplicand7;
+            5'b01111          : next_accumulator += multiplicand << 3;
+            5'b10000          : next_accumulator -= multiplicand << 3;
+            5'b10001, 5'b10010: next_accumulator -= multiplicand7;
+            5'b10011, 5'b10100: next_accumulator -= multiplicand3 << 1;
+            5'b10101, 5'b10110: next_accumulator -= multiplicand5;
+            5'b10111, 5'b11000: next_accumulator -= multiplicand << 2;
+            5'b11001, 5'b11010: next_accumulator -= multiplicand3;
+            5'b11011, 5'b11100: next_accumulator -= multiplicand << 1;
+            5'b11101, 5'b11110: next_accumulator -= multiplicand;
+            default           : {}
         }
-        shifted_accumulator = {next_accumulator[msb] repeat 3, next_accumulator[ACC_WIDTH - 1:3]};
-        shifted_multiplier  = {next_accumulator[2:0], multiplier[BOOTH_WIDTH - 1:3]};
+        shifted_accumulator = {next_accumulator[msb] repeat 4, next_accumulator[ACC_WIDTH - 1:4]};
+        shifted_multiplier  = {next_accumulator[3:0], multiplier[BOOTH_WIDTH - 1:4]};
     }
 
     var add_count: logic<6>;
@@ -299,6 +309,8 @@ module mulunit #(
             accumulator   = 0;
             multiplicand  = 0;
             multiplicand3 = 0;
+            multiplicand5 = 0;
+            multiplicand7 = 0;
             multiplier    = 0;
             previous_bit  = 0;
             high_saved    = 0;
@@ -314,6 +326,8 @@ module mulunit #(
                     accumulator   = 0;
                     multiplicand  = extended_op1;
                     multiplicand3 = extended_op1 + (extended_op1 << 1);
+                    multiplicand5 = extended_op1 + (extended_op1 << 2);
+                    multiplicand7 = (extended_op1 << 3) - extended_op1;
                     multiplier    = {1'b0 repeat BOOTH_WIDTH - WIDTH, op2};
                     previous_bit  = 0;
                     high_saved    = high;
@@ -321,7 +335,7 @@ module mulunit #(
                 State::AddLoop: {
                     accumulator  = shifted_accumulator;
                     multiplier   = shifted_multiplier;
-                    previous_bit = multiplier[2];
+                    previous_bit = multiplier[3];
 
                     if add_count == ITERATIONS[0+:6] - 1 {
                         state    = State::Idle;
