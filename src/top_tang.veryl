@@ -6,6 +6,9 @@ module top_tang #(
     clk: input  clock   ,
     rst: input  logic   ,
     led: output logic<6>,
+    // uart
+    uart_rxd: input  logic,
+    uart_txd: output logic,
     // graphics
     link_ready: input  logic,
     link_sclk : output logic,
@@ -32,6 +35,8 @@ module top_tang #(
         clk                    ,
         rst          : core_rst,
         led          : led_top ,
+        uart_rxd               ,
+        uart_txd               ,
         link_ready             ,
         link_sclk              ,
         link_mosi              ,

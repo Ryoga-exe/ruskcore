@@ -1,0 +1,115 @@
+// ref: https://github.com/sipeed/TangNano-20K-example/blob/main/uart/src/uart_rx.v
+module uart_rx #(
+    param CLK_FRE  : u32 = 50    , //clock frequency(Mhz)
+    param BAUD_RATE: u32 = 115200, //serial baud rate
+) (
+    clk          : input  clock   ,
+    rst          : input  reset   ,
+    rx_data      : output logic<8>,
+    rx_data_valid: output logic   ,
+    rx_data_ready: input  logic   ,
+    rx_pin       : input  logic   ,
+) {
+    const CYCLE: u16 = (CLK_FRE * 1000000 / BAUD_RATE) as u16;
+
+    enum State {
+        Idle,
+        Start,
+        RecByte,
+        Stop,
+        Data,
+    }
+
+    var state     : State;
+    var next_state: State;
+
+    var rx_d0     : logic;
+    var rx_d1     : logic;
+    let rx_negedge: logic = rx_d1 && ~rx_d0;
+
+    var rx_bits  : logic<8> ;
+    var cycle_cnt: logic<16>;
+    var bit_cnt  : logic<3> ;
+
+    always_ff {
+        if_reset {
+            rx_d0 = 0;
+            rx_d1 = 0;
+        } else {
+            rx_d0 = rx_pin;
+            rx_d1 = rx_d0;
+        }
+    }
+
+    always_ff {
+        if_reset {
+            state = State::Idle;
+        } else {
+            state = next_state;
+        }
+    }
+
+    always_comb {
+        next_state = case state {
+            State::Idle   : if rx_negedge ? State::Start : State::Idle,
+            State::Start  : if cycle_cnt == CYCLE - 1 ? State::RecByte : State::Start,
+            State::RecByte: if cycle_cnt == CYCLE - 1 && bit_cnt == 3'd7 ? State::Stop : State::RecByte,
+            State::Stop   : if cycle_cnt == CYCLE / 2 - 1 ? State::Data : State::Stop,
+            State::Data   : if rx_data_ready ? State::Idle : State::Data,
+            default       : State::Idle,
+        };
+    }
+
+    always_ff {
+        if_reset {
+            rx_data_valid = 0;
+        } else if state == State::Stop && next_state != state {
+            rx_data_valid = 1;
+        } else if state == State::Data && rx_data_ready {
+            rx_data_valid = 0;
+        }
+    }
+
+    always_ff {
+        if_reset {
+            rx_data = 0;
+        } else if state == State::Stop && next_state != state {
+            rx_data = rx_bits; // latch received data
+        }
+    }
+
+    always_ff {
+        if_reset {
+            bit_cnt = 0;
+        } else if state == State::RecByte {
+            if cycle_cnt == CYCLE - 1 {
+                bit_cnt += 1;
+            } else {
+                bit_cnt = bit_cnt;
+            }
+        } else {
+            bit_cnt = 0;
+        }
+    }
+
+    always_ff {
+        if_reset {
+            cycle_cnt = 0;
+        } else if (state == State::RecByte && cycle_cnt == CYCLE - 1) || next_state != state {
+            cycle_cnt = 0;
+        } else {
+            cycle_cnt += 1;
+        }
+    }
+
+    // receive serial data bit data
+    always_ff {
+        if_reset {
+            rx_bits = 0;
+        } else if state == State::RecByte && cycle_cnt == CYCLE / 2 - 1 {
+            rx_bits[bit_cnt] = rx_pin;
+        } else {
+            rx_bits = rx_bits;
+        }
+    }
+}

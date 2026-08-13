@@ -1,0 +1,96 @@
+// ref: https://github.com/sipeed/TangNano-20K-example/blob/main/uart/src/uart_tx.v
+module uart_tx #(
+    param CLK_FRE  : u32 = 50    , //clock frequency(Mhz)
+    param BAUD_RATE: u32 = 115200, //serial baud rate
+) (
+    clk          : input  clock   ,
+    rst          : input  reset   ,
+    tx_data      : input  logic<8>,
+    tx_data_valid: input  logic   ,
+    tx_data_ready: output logic   ,
+    tx_pin       : output logic   ,
+) {
+    const CYCLE: u16 = (CLK_FRE * 1000000 / BAUD_RATE) as u16;
+
+    enum State {
+        Idle,
+        Start, // start bit
+        SendByte, // data bits
+        Stop, // stop bit
+    }
+
+    var state     : State;
+    var next_state: State;
+
+    var cycle_cnt    : logic<16>;
+    var bit_cnt      : logic<3> ;
+    var tx_data_latch: logic<8> ; // latch data to send
+    var tx_reg       : logic    ;
+
+    assign tx_pin        = tx_reg;
+    assign tx_data_ready = state == State::Idle;
+    let tx_fire: logic = tx_data_valid && tx_data_ready;
+
+    always_ff {
+        if_reset {
+            state = State::Idle;
+        } else {
+            state = next_state;
+        }
+    }
+
+    always_comb {
+        next_state = case state {
+            State::Idle    : if tx_fire ? State::Start : State::Idle,
+            State::Start   : if cycle_cnt == CYCLE - 1 ? State::SendByte : State::Start,
+            State::SendByte: if cycle_cnt == CYCLE - 1 && bit_cnt == 7 ? State::Stop : State::SendByte,
+            State::Stop    : if cycle_cnt == CYCLE - 1 ? State::Idle : State::Stop,
+            default        : State::Idle,
+        };
+    }
+
+    always_ff {
+        if_reset {
+            tx_data_latch = 0;
+        } else if tx_fire {
+            tx_data_latch = tx_data;
+        }
+    }
+
+    always_ff {
+        if_reset {
+            bit_cnt = 0;
+        } else if state == State::SendByte {
+            if cycle_cnt == CYCLE - 1 {
+                bit_cnt += 1;
+            } else {
+                bit_cnt = bit_cnt;
+            }
+        } else {
+            bit_cnt = 0;
+        }
+    }
+
+    always_ff {
+        if_reset {
+            cycle_cnt = 0;
+        } else if (state == State::SendByte && cycle_cnt == CYCLE - 1) || next_state != state {
+            cycle_cnt = 0;
+        } else {
+            cycle_cnt += 1;
+        }
+    }
+
+    always_ff {
+        if_reset {
+            tx_reg = 1;
+        } else {
+            tx_reg = case state {
+                State::Idle, State::Stop: 1,
+                State::Start            : 0,
+                State::SendByte         : tx_data_latch[bit_cnt],
+                default                 : 1,
+            };
+        }
+    }
+}

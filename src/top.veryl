@@ -12,6 +12,8 @@ module top #(
     clk          : input  clock,
     rst          : input  reset,
     led          : output UIntX,
+    uart_rxd     : input  logic,
+    uart_txd     : output logic,
     link_ready   : input  logic,
     link_sclk    : output logic,
     link_mosi    : output logic,
@@ -30,6 +32,7 @@ module top #(
     inst ram_membus     : membus_if::<RAM_DATA_WIDTH, RAM_ADDR_WIDTH>;
     inst rom_membus     : membus_if::<ROM_DATA_WIDTH, ROM_ADDR_WIDTH>;
     inst dbg_membus     : Membus;
+    inst uart_membus    : Membus;
     inst gpu_membus     : Membus;
     inst i_membus       : Membus; // two instructions per fetch
     inst d_membus       : Membus; // for load/store
@@ -73,14 +76,25 @@ module top #(
     }
 
     inst mmioc: mmio_controller (
-        clk                        ,
-        rst                        ,
-        DBG_ADDR  : MMAP_DBG_ADDR  ,
-        req_core  : mmio_membus    ,
-        ram_membus: mmio_ram_membus,
-        rom_membus: mmio_rom_membus,
-        dbg_membus                 ,
-        gpu_membus                 ,
+        clk                         ,
+        rst                         ,
+        DBG_ADDR   : MMAP_DBG_ADDR  ,
+        req_core   : mmio_membus    ,
+        ram_membus : mmio_ram_membus,
+        rom_membus : mmio_rom_membus,
+        dbg_membus                  ,
+        uart_membus                 ,
+        gpu_membus                  ,
+    );
+
+    inst uart0: uart_mmio #(
+        CLK_FRE: 27,
+    ) (
+        clk                ,
+        rst                ,
+        membus: uart_membus,
+        rxd   : uart_rxd   ,
+        txd   : uart_txd   ,
     );
 
     inst gpu: graphics_mmio (

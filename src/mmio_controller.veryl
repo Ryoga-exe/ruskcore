@@ -1,20 +1,22 @@
 import eei::*;
 
 module mmio_controller (
-    clk       : input   clock         ,
-    rst       : input   reset         ,
-    DBG_ADDR  : input   Addr          ,
-    req_core  : modport Membus::slave ,
-    ram_membus: modport Membus::master,
-    rom_membus: modport Membus::master,
-    dbg_membus: modport Membus::master,
-    gpu_membus: modport Membus::master,
+    clk        : input   clock         ,
+    rst        : input   reset         ,
+    DBG_ADDR   : input   Addr          ,
+    req_core   : modport Membus::slave ,
+    ram_membus : modport Membus::master,
+    rom_membus : modport Membus::master,
+    dbg_membus : modport Membus::master,
+    uart_membus: modport Membus::master,
+    gpu_membus : modport Membus::master,
 ) {
     enum Device {
         UNKNOWN,
         RAM,
         ROM,
         DEBUG,
+        UART,
         GRAPHICS,
     }
 
@@ -59,6 +61,7 @@ module mmio_controller (
         reset_membus_master(ram_membus);
         reset_membus_master(rom_membus);
         reset_membus_master(dbg_membus);
+        reset_membus_master(uart_membus);
         reset_membus_master(gpu_membus);
     }
 
@@ -71,6 +74,9 @@ module mmio_controller (
         }
         if MMAP_GRAPHICS_BEGIN <= addr && addr <= MMAP_GRAPHICS_END {
             return Device::GRAPHICS;
+        }
+        if MMAP_UART_BEGIN <= addr && addr <= MMAP_UART_END {
+            return Device::UART;
         }
         if MMAP_ROM_BEGIN <= addr && addr <= MMAP_ROM_END {
             return Device::ROM;
@@ -107,6 +113,13 @@ module mmio_controller (
                 dbg_membus.wdata = req.wdata;
                 dbg_membus.wmask = req.wmask;
             }
+            Device::UART: {
+                uart_membus.valid = req.valid;
+                uart_membus.addr  = req.addr - MMAP_UART_BEGIN;
+                uart_membus.wen   = req.wen;
+                uart_membus.wdata = req.wdata;
+                uart_membus.wmask = req.wmask;
+            }
             Device::GRAPHICS: {
                 gpu_membus.valid = req.valid;
                 gpu_membus.addr  = req.addr - MMAP_GRAPHICS_BEGIN;
@@ -139,6 +152,10 @@ module mmio_controller (
                 req.rvalid = dbg_membus.rvalid;
                 req.rdata  = dbg_membus.rdata;
             }
+            Device::UART: {
+                req.rvalid = uart_membus.rvalid;
+                req.rdata  = uart_membus.rdata;
+            }
             Device::GRAPHICS: {
                 req.rvalid = gpu_membus.rvalid;
                 req.rdata  = gpu_membus.rdata;
@@ -155,6 +172,7 @@ module mmio_controller (
             Device::RAM     : ram_membus.ready,
             Device::ROM     : rom_membus.ready,
             Device::DEBUG   : dbg_membus.ready,
+            Device::UART    : uart_membus.ready,
             Device::GRAPHICS: gpu_membus.ready,
             default         : 1,
         };
@@ -168,6 +186,7 @@ module mmio_controller (
             Device::RAM     : ram_membus.rvalid,
             Device::ROM     : rom_membus.rvalid,
             Device::DEBUG   : dbg_membus.rvalid,
+            Device::UART    : uart_membus.rvalid,
             Device::GRAPHICS: gpu_membus.rvalid,
             default         : 1,
         };
