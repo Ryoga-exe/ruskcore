@@ -226,16 +226,15 @@ module core (
     let ids_lane1_rs2_addr: logic<5> = if_fifo_rdata.lane1_bits[24:20];
     let ids_lane1_rd_addr : logic<5> = if_fifo_rdata.lane1_bits[11:7];
 
-    let ids_lane1_alu : logic = ids_lane1_inst_valid && ids_lane1_ctrl.rwb_en && !inst_is_memop(ids_lane1_ctrl)
-        && !ids_lane1_ctrl.is_csr && !ids_lane1_ctrl.is_muldiv && !ids_lane1_ctrl.is_jump
-        && !inst_is_br(ids_lane1_ctrl);
-    let ids_lane1_raw : logic = ids_ctrl.rwb_en && ids_rd_addr != 0
+    let ids_lane1_executable: logic = ids_lane1_inst_valid && ids_lane1_ctrl.rwb_en && !inst_is_memop(ids_lane1_ctrl)
+        && !ids_lane1_ctrl.is_csr && !ids_lane1_ctrl.is_jump && !inst_is_br(ids_lane1_ctrl);
+    let ids_lane1_raw       : logic = ids_ctrl.rwb_en && ids_rd_addr != 0
         && (inst_uses_rs1(ids_lane1_ctrl) && ids_rd_addr == ids_lane1_rs1_addr || inst_uses_rs2(ids_lane1_ctrl)
             && ids_rd_addr == ids_lane1_rs2_addr);
-    let ids_lane1_waw : logic = ids_ctrl.rwb_en && ids_rd_addr != 0 && ids_lane1_ctrl.rwb_en && ids_rd_addr
+    let ids_lane1_waw       : logic = ids_ctrl.rwb_en && ids_rd_addr != 0 && ids_lane1_ctrl.rwb_en && ids_rd_addr
         == ids_lane1_rd_addr;
-    let ids_dual_issue: logic = !ids_deferred_valid && if_fifo_rdata.lane1_valid && ids_inst_valid && !ids_ctrl.is_csr
-        && ids_lane1_alu && !ids_lane1_raw && !ids_lane1_waw;
+    let ids_dual_issue      : logic = !ids_deferred_valid && if_fifo_rdata.lane1_valid && ids_inst_valid
+        && !ids_ctrl.is_csr && ids_lane1_executable && !ids_lane1_raw && !ids_lane1_waw;
 
     always_ff {
         if_reset {
@@ -442,7 +441,17 @@ module core (
         result: exs_lane1_alu_result,
     );
 
-    let exs_lane1_result: UIntX = if exs_lane1_ctrl.is_lui ? exs_lane1_imm : exs_lane1_alu_result;
+    // Bru
+    var exs_brunit_take: logic;
+
+    inst bru: brunit (
+        funct3: exs_ctrl.funct3,
+        op1   : exs_op1        ,
+        op2   : exs_op2        ,
+        take  : exs_brunit_take,
+    );
+
+    let exs_actual_taken: logic = exs_ctrl.is_jump || inst_is_br(exs_ctrl) && exs_brunit_take;
 
     // MulDiv
     var exs_muldiv_valid       : logic;
@@ -466,12 +475,43 @@ module core (
         result : exs_muldiv_result,
     );
 
+    var exs_lane1_muldiv_valid       : logic;
+    var exs_lane1_muldiv_ready       : logic;
+    var exs_lane1_muldiv_rvalid      : logic;
+    var exs_lane1_muldiv_result      : UIntX;
+    var exs_lane1_muldiv_rvalided    : logic;
+    var exs_lane1_muldiv_stall       : logic;
+    var exs_lane1_muldiv_is_requested: logic;
+
+    inst lane1_mdu: muldivunit (
+        clk                             ,
+        rst                             ,
+        ready  : exs_lane1_muldiv_ready ,
+        valid  : exs_lane1_muldiv_valid ,
+        funct3 : exs_lane1_ctrl.funct3  ,
+        is_op32: exs_lane1_ctrl.is_op32 ,
+        op1    : exs_lane1_op1          ,
+        op2    : exs_lane1_op2          ,
+        rvalid : exs_lane1_muldiv_rvalid,
+        result : exs_lane1_muldiv_result,
+    );
+
     always_comb {
         exs_muldiv_valid = 0;
         exs_muldiv_stall = 0;
         if (exs_valid && exs_ctrl.is_muldiv) {
             exs_muldiv_valid = !exs_mem_data_hazard && !exs_muldiv_is_requested;
             exs_muldiv_stall = !(exs_muldiv_rvalid && exs_muldiv_is_requested) && !exs_muldiv_rvalided;
+        }
+    }
+
+    always_comb {
+        exs_lane1_muldiv_valid = 0;
+        exs_lane1_muldiv_stall = 0;
+        if exs_lane1_valid && exs_lane1_ctrl.is_muldiv && !exs_actual_taken {
+            exs_lane1_muldiv_valid = !exs_mem_data_hazard && !exs_lane1_muldiv_is_requested;
+            exs_lane1_muldiv_stall = !(exs_lane1_muldiv_rvalid && exs_lane1_muldiv_is_requested)
+                && !exs_lane1_muldiv_rvalided;
         }
     }
 
@@ -497,21 +537,35 @@ module core (
         }
     }
 
-    // Bru
-    var exs_brunit_take: logic;
+    always_ff {
+        if_reset {
+            exs_lane1_muldiv_rvalided     = 0;
+            exs_lane1_muldiv_is_requested = 0;
+        } else {
+            if exq_rvalid && exq_rready {
+                exs_lane1_muldiv_rvalided     = 0;
+                exs_lane1_muldiv_is_requested = 0;
+            } else {
+                if exs_lane1_muldiv_is_requested {
+                    exs_lane1_muldiv_rvalided |= exs_lane1_muldiv_rvalid;
+                }
+                if exs_lane1_muldiv_valid && exs_lane1_muldiv_ready {
+                    exs_lane1_muldiv_is_requested = 1;
+                }
+            }
+        }
+    }
 
-    inst bru: brunit (
-        funct3: exs_ctrl.funct3,
-        op1   : exs_op1        ,
-        op2   : exs_op2        ,
-        take  : exs_brunit_take,
-    );
+    let exs_lane1_result: UIntX = switch {
+        exs_lane1_ctrl.is_muldiv: exs_lane1_muldiv_result,
+        exs_lane1_ctrl.is_lui   : exs_lane1_imm,
+        default                 : exs_lane1_alu_result,
+    };
 
-    let exs_stall: logic = exs_mem_data_hazard || exs_muldiv_stall;
+    let exs_stall: logic = exs_mem_data_hazard || exs_muldiv_stall || exs_lane1_muldiv_stall;
 
     // branch prediction
     let exs_is_control_transfer: logic = inst_is_br(exs_ctrl) || exs_ctrl.is_jump;
-    let exs_actual_taken       : logic = exs_ctrl.is_jump || inst_is_br(exs_ctrl) && exs_brunit_take;
     let exs_actual_target      : Addr  = if inst_is_br(exs_ctrl) ? exs_pc + exs_imm : exs_alu_result & ~1;
     let bp_update_valid        : logic = exs_valid && exq_rready && exs_is_control_transfer && !control_hazard;
 
