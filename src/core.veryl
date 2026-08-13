@@ -61,16 +61,26 @@ module core (
     // ====================================================
     // * IF stage
     // ====================================================
-    var if_pc                        : Addr ; // program counter
-    var if_is_requested              : logic; // fetch 中か
-    var if_pc_requested              : Addr ; // 要求アドレス
-    var if_predicted_taken_requested : logic;
-    var if_predicted_target_requested: Addr ;
-    let if_pc_next                   : Addr  = if if_pc[2] == 0 ? if_pc + 8 : if_pc + 4;
+    var if_pc                         : Addr ; // program counter
+    var if_is_requested               : logic; // fetch 中か
+    var if_pc_requested               : Addr ; // 要求アドレス
+    var if_prediction_valid_requested : logic;
+    var if_prediction_slot_requested  : logic;
+    var if_prediction_taken_requested : logic;
+    var if_prediction_target_requested: Addr ;
+    let if_pc_next                    : Addr  = if if_pc[2] == 0 ? if_pc + 8 : if_pc + 4;
 
+    var if_predict_valid    : logic;
+    var if_predict_slot     : logic;
     var if_predict_taken    : logic;
     var if_predict_target   : Addr ;
-    let if_predicted_pc_next: Addr  = if if_predict_taken ? if_predict_target : if_pc_next;
+    let if_predicted_pc_next: Addr  = if if_predict_valid && if_predict_taken ? if_predict_target : if_pc_next;
+
+    let if_requested_lane0_predicted_taken: logic = if_prediction_valid_requested && if_prediction_slot_requested
+        == if_pc_requested[2] && if_prediction_taken_requested;
+    let if_requested_lane1_predicted_taken: logic = if_prediction_valid_requested && !if_pc_requested[2]
+        && if_prediction_slot_requested && if_prediction_taken_requested;
+    let if_requested_lane1_valid          : logic = !if_pc_requested[2] && !if_requested_lane0_predicted_taken;
 
     var control_hazard        : logic;
     var control_hazard_pc_next: Addr ;
@@ -94,11 +104,13 @@ module core (
 
     always_ff {
         if_reset {
-            if_pc                         = INITIAL_PC;
-            if_is_requested               = 0;
-            if_pc_requested               = 0;
-            if_predicted_taken_requested  = 0;
-            if_predicted_target_requested = 0;
+            if_pc                          = INITIAL_PC;
+            if_is_requested                = 0;
+            if_pc_requested                = 0;
+            if_prediction_valid_requested  = 0;
+            if_prediction_slot_requested   = 0;
+            if_prediction_taken_requested  = 0;
+            if_prediction_target_requested = 0;
         } else {
             if fetch_redirect {
                 if_pc           = fetch_redirect_pc;
@@ -108,19 +120,23 @@ module core (
                     if i_membus.rvalid {
                         if_is_requested = i_membus.ready && i_membus.valid;
                         if i_membus.ready && i_membus.valid {
-                            if_pc                         = if_predicted_pc_next;
-                            if_pc_requested               = if_pc;
-                            if_predicted_taken_requested  = if_predict_taken;
-                            if_predicted_target_requested = if_predict_target;
+                            if_pc                          = if_predicted_pc_next;
+                            if_pc_requested                = if_pc;
+                            if_prediction_valid_requested  = if_predict_valid;
+                            if_prediction_slot_requested   = if_predict_slot;
+                            if_prediction_taken_requested  = if_predict_taken;
+                            if_prediction_target_requested = if_predict_target;
                         }
                     }
                 } else {
                     if i_membus.ready && i_membus.valid {
-                        if_is_requested               = 1;
-                        if_pc                         = if_predicted_pc_next;
-                        if_pc_requested               = if_pc;
-                        if_predicted_taken_requested  = if_predict_taken;
-                        if_predicted_target_requested = if_predict_target;
+                        if_is_requested                = 1;
+                        if_pc                          = if_predicted_pc_next;
+                        if_pc_requested                = if_pc;
+                        if_prediction_valid_requested  = if_predict_valid;
+                        if_prediction_slot_requested   = if_predict_slot;
+                        if_prediction_taken_requested  = if_predict_taken;
+                        if_prediction_target_requested = if_predict_target;
                     }
                 }
             }
@@ -142,18 +158,20 @@ module core (
                 if_fifo_wvalid = 0;
             } else {
                 if if_is_requested && i_membus.rvalid {
-                    if_fifo_wvalid                 = 1;
-                    if_fifo_wdata.addr             = if_pc_requested;
-                    if_fifo_wdata.bits             = if if_pc_requested[2] == 0 ?
+                    if_fifo_wvalid                       = 1;
+                    if_fifo_wdata.addr                   = if_pc_requested;
+                    if_fifo_wdata.bits                   = if if_pc_requested[2] == 0 ?
                         i_membus.rdata[31:0]
                     :
                         i_membus.rdata[63:32]
                     ;
-                    if_fifo_wdata.predicted_taken  = if_predicted_taken_requested;
-                    if_fifo_wdata.predicted_target = if_predicted_target_requested;
-                    if_fifo_wdata.lane1_valid      = !if_predicted_taken_requested && if_pc_requested[2] == 0;
-                    if_fifo_wdata.lane1_addr       = if_pc_requested + 4;
-                    if_fifo_wdata.lane1_bits       = i_membus.rdata[63:32];
+                    if_fifo_wdata.predicted_taken        = if_requested_lane0_predicted_taken;
+                    if_fifo_wdata.predicted_target       = if_prediction_target_requested;
+                    if_fifo_wdata.lane1_valid            = if_requested_lane1_valid;
+                    if_fifo_wdata.lane1_addr             = if_pc_requested + 4;
+                    if_fifo_wdata.lane1_bits             = i_membus.rdata[63:32];
+                    if_fifo_wdata.lane1_predicted_taken  = if_requested_lane1_predicted_taken;
+                    if_fifo_wdata.lane1_predicted_target = if_prediction_target_requested;
                     #[ifdef(KONATA_TRACE)]
                     block {
                         if_trace_wdata       = trace_next_id;
@@ -172,9 +190,11 @@ module core (
     // ====================================================
     // * ID stage
     // ====================================================
-    var ids_deferred_valid: logic;
-    var ids_deferred_addr : Addr ;
-    var ids_deferred_bits : Inst ;
+    var ids_deferred_valid           : logic;
+    var ids_deferred_addr            : Addr ;
+    var ids_deferred_bits            : Inst ;
+    var ids_deferred_predicted_taken : logic;
+    var ids_deferred_predicted_target: Addr ;
 
     let ids_valid     : logic    = ids_deferred_valid || if_fifo_rvalid;
     let ids_pc        : Addr     = if ids_deferred_valid ? ids_deferred_addr : if_fifo_rdata.addr;
@@ -219,9 +239,11 @@ module core (
 
     always_ff {
         if_reset {
-            ids_deferred_valid = 0;
-            ids_deferred_addr  = 0;
-            ids_deferred_bits  = 0;
+            ids_deferred_valid            = 0;
+            ids_deferred_addr             = 0;
+            ids_deferred_bits             = 0;
+            ids_deferred_predicted_taken  = 0;
+            ids_deferred_predicted_target = 0;
             #[ifdef(KONATA_TRACE)]
             block {
                 ids_deferred_trace_id = 0;
@@ -232,9 +254,11 @@ module core (
             if ids_deferred_valid {
                 ids_deferred_valid = 0;
             } else if if_fifo_rvalid && if_fifo_rready && if_fifo_rdata.lane1_valid && !ids_dual_issue {
-                ids_deferred_valid = 1;
-                ids_deferred_addr  = if_fifo_rdata.lane1_addr;
-                ids_deferred_bits  = if_fifo_rdata.lane1_bits;
+                ids_deferred_valid            = 1;
+                ids_deferred_addr             = if_fifo_rdata.lane1_addr;
+                ids_deferred_bits             = if_fifo_rdata.lane1_bits;
+                ids_deferred_predicted_taken  = if_fifo_rdata.lane1_predicted_taken;
+                ids_deferred_predicted_target = if_fifo_rdata.lane1_predicted_target;
                 #[ifdef(KONATA_TRACE)]
                 block {
                     ids_deferred_trace_id = id_lane1_trace_id;
@@ -251,8 +275,16 @@ module core (
         exq_wdata.bits             = ids_inst_bits;
         exq_wdata.ctrl             = ids_ctrl;
         exq_wdata.imm              = ids_imm;
-        exq_wdata.predicted_taken  = if ids_deferred_valid ? 0 : if_fifo_rdata.predicted_taken;
-        exq_wdata.predicted_target = if ids_deferred_valid ? 0 : if_fifo_rdata.predicted_target;
+        exq_wdata.predicted_taken  = if ids_deferred_valid ?
+            ids_deferred_predicted_taken
+        :
+            if_fifo_rdata.predicted_taken
+        ;
+        exq_wdata.predicted_target = if ids_deferred_valid ?
+            ids_deferred_predicted_target
+        :
+            if_fifo_rdata.predicted_target
+        ;
         exq_wdata.lane1_valid      = ids_dual_issue;
         exq_wdata.lane1_addr       = if_fifo_rdata.lane1_addr;
         exq_wdata.lane1_bits       = if_fifo_rdata.lane1_bits;
@@ -754,6 +786,8 @@ module core (
         clk                                        ,
         rst                                        ,
         if_pc                                      ,
+        if_predict_valid                           ,
+        if_predict_slot                            ,
         if_predict_taken                           ,
         if_predict_target                          ,
         exs_pc                                     ,
@@ -884,7 +918,7 @@ module core (
                     if_pc_requested,
                     if if_pc_requested[2] == 0 ? i_membus.rdata[31:0] : i_membus.rdata[63:32],
                 );
-                if !if_predicted_taken_requested && if_pc_requested[2] == 0 {
+                if if_requested_lane1_valid {
                     util::konata_stage(0, trace_next_id + 1, if_pc_requested + 4, i_membus.rdata[63:32]);
                     trace_next_id += 2;
                 } else {

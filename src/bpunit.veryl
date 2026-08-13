@@ -1,12 +1,13 @@
 import eei::*;
 
-/// Direct-mapped branch target buffer with a bimodal 2-bit predictor.
 // branch predictor
 // 2-bit bimodal
 module bpunit (
     clk: input clock,
     rst: input reset,
     // from IF stage -> predict
+    if_predict_valid : output logic,
+    if_predict_slot  : output logic,
     if_pc            : input  Addr ,
     if_predict_taken : output logic,
     if_predict_target: output Addr ,
@@ -19,21 +20,25 @@ module bpunit (
 ) {
     const HISTORY_WIDTH: u32 = 8;
     const ENTRY_COUNT  : u32 = 2 ** HISTORY_WIDTH;
-    const TAG_WIDTH    : u32 = XLEN - HISTORY_WIDTH - 2;
+    const TAG_WIDTH    : u32 = XLEN - HISTORY_WIDTH - 3;
 
     var valid_bits: logic<ENTRY_COUNT>              ;
     var tags      : logic<TAG_WIDTH>   [ENTRY_COUNT];
+    var slots     : logic              [ENTRY_COUNT];
     var targets   : Addr               [ENTRY_COUNT];
     var pht       : logic<2>           [ENTRY_COUNT];
 
-    let if_index : logic<HISTORY_WIDTH> = if_pc[2+:HISTORY_WIDTH];
-    let if_tag   : logic<TAG_WIDTH>     = if_pc[HISTORY_WIDTH + 2+:TAG_WIDTH];
-    let exs_index: logic<HISTORY_WIDTH> = exs_pc[2+:HISTORY_WIDTH];
-    let exs_tag  : logic<TAG_WIDTH>     = exs_pc[HISTORY_WIDTH + 2+:TAG_WIDTH];
-    let exs_hit  : logic                = valid_bits[exs_index] && tags[exs_index] == exs_tag;
+    let if_index : logic<HISTORY_WIDTH> = if_pc[3+:HISTORY_WIDTH];
+    let if_tag   : logic<TAG_WIDTH>     = if_pc[HISTORY_WIDTH + 3+:TAG_WIDTH];
+    let exs_index: logic<HISTORY_WIDTH> = exs_pc[3+:HISTORY_WIDTH];
+    let exs_tag  : logic<TAG_WIDTH>     = exs_pc[HISTORY_WIDTH + 3+:TAG_WIDTH];
+    let exs_hit  : logic                = valid_bits[exs_index] && tags[exs_index] == exs_tag && slots[exs_index]
+        == exs_pc[2];
 
     always_comb {
-        if_predict_taken  = valid_bits[if_index] && tags[if_index] == if_tag && pht[if_index][1];
+        if_predict_valid  = valid_bits[if_index] && tags[if_index] == if_tag && (!if_pc[2] || slots[if_index]);
+        if_predict_slot   = slots[if_index];
+        if_predict_taken  = if_predict_valid && pht[if_index][1];
         if_predict_target = targets[if_index];
     }
 
@@ -44,6 +49,7 @@ module bpunit (
         } else if exs_update_valid {
             valid_bits[exs_index] = 1;
             tags[exs_index]       = exs_tag;
+            slots[exs_index]      = exs_pc[2];
             targets[exs_index]    = exs_update_target;
 
             if exs_update_unconditional {

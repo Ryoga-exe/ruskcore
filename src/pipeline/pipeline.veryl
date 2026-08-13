@@ -8,13 +8,15 @@ package pipeline {
 
     // IF -> ID
     struct if_fifo_type {
-        addr            : Addr ,
-        bits            : Inst ,
-        predicted_taken : logic,
-        predicted_target: Addr ,
-        lane1_valid     : logic,
-        lane1_addr      : Addr ,
-        lane1_bits      : Inst ,
+        addr                  : Addr ,
+        bits                  : Inst ,
+        predicted_taken       : logic,
+        predicted_target      : Addr ,
+        lane1_valid           : logic,
+        lane1_addr            : Addr ,
+        lane1_bits            : Inst ,
+        lane1_predicted_taken : logic,
+        lane1_predicted_target: Addr ,
     }
 
     // ID -> EX
