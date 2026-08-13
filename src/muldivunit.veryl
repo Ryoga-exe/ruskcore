@@ -15,7 +15,6 @@ module muldivunit (
     enum State {
         Idle,
         WaitValid,
-        Finish,
     }
 
     var state: State;
@@ -123,8 +122,7 @@ module muldivunit (
 
     // state
     always_comb {
-        ready  = (state == State::Idle);
-        rvalid = (state == State::Finish);
+        ready = (state == State::Idle);
     }
 
     always_ff {
@@ -135,7 +133,9 @@ module muldivunit (
             is_op32_saved = 0;
             op1sign_saved = 0;
             op2sign_saved = 0;
+            rvalid        = 0;
         } else {
+            rvalid = 0;
             case state {
                 State::Idle     : if ready && valid {
                     funct3_saved  = funct3;
@@ -148,14 +148,16 @@ module muldivunit (
                     } else {
                         // div ad-hoc proc
                         if du_signed_overflow {
-                            state  = State::Finish;
+                            state  = State::Idle;
+                            rvalid = 1;
                             result = if funct3[1] ?
                                 0
                             :
                                 (if is_op32 ? sext::<32, XLEN>(op1[31:0]) : {1'b1, 1'b0 repeat XLEN - 1})
                             ; // REM : DIV
                         } else if du_signed_divzero {
-                            state  = State::Finish;
+                            state  = State::Idle;
+                            rvalid = 1;
                             result = if funct3[1] ? (if is_op32 ? sext::<32, 64>(op1[31:0]) : op1) : '1; // REM : DIV
                         } else {
                             state = State::WaitValid;
@@ -172,7 +174,8 @@ module muldivunit (
                     let res_signed    : logic<XLEN> = if op1sign_saved != op2sign_saved ? negated_result : mu_result;
                     let res_mulhsu    : logic<XLEN> = if op1sign_saved ? negated_result : mu_result;
 
-                    state  = State::Finish;
+                    state  = State::Idle;
+                    rvalid = 1;
                     result = case funct3_saved[1:0] {
                         2'b00  : if is_op32_saved ? sext::<32, 64>(res_signed[31:0]) : res_signed, // MUL, MULW
                         2'b01  : res_signed, // MULH
@@ -195,11 +198,11 @@ module muldivunit (
                         2'b11  : du_remainder[XLEN - 1:0], // REMU
                         default: 0,
                     };
-                    state  = State::Finish;
+                    state  = State::Idle;
+                    rvalid = 1;
                     result = if is_op32_saved ? sext::<32, 64>(resultX[31:0]) : resultX;
                 }
-                State::Finish: state = State::Idle;
-                default      : {}
+                default: {}
             }
         }
     }
