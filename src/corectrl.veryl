@@ -49,6 +49,19 @@ package corectrl {
         return ctrl.itype == InstType::B;
     }
 
+    function inst_uses_rs1 (
+        ctrl: input InstCtrl,
+    ) -> logic {
+        return ctrl.itype == InstType::R || ctrl.itype == InstType::I || ctrl.itype == InstType::S || ctrl.itype
+            == InstType::B;
+    }
+
+    function inst_uses_rs2 (
+        ctrl: input InstCtrl,
+    ) -> logic {
+        return ctrl.itype == InstType::R || ctrl.itype == InstType::S || ctrl.itype == InstType::B;
+    }
+
     /// Struct for exceptions
     struct ExceptionInfo {
         valid: logic   ,
