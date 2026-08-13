@@ -39,38 +39,61 @@ module muldivunit (
     }
 
     // multiply unit
-    const MUL_OP_WIDTH: u32 = XLEN;
+    const MUL_OP_WIDTH : u32 = XLEN;
+    const MULW_OP_WIDTH: u32 = 32;
 
     let is_mul     : logic       = if state == State::Idle ? !funct3[2] : !funct3_saved[2];
     var mu_rvalid  : logic      ;
     var mu_result  : logic<XLEN>;
     var mu_low_zero: logic      ;
+    var mwu_rvalid : logic      ;
+    var mwu_result : logic<32>  ;
 
     let mu_op1: logic<MUL_OP_WIDTH> = case funct3[1:0] {
-        2'b00, 2'b01, 2'b10: abs::<XLEN>(if is_op32 ? sext::<32, XLEN>(op1[31:0]) : op1), // MUL, MULH, MULHSU, MULW
+        2'b00, 2'b01, 2'b10: abs::<XLEN>(op1), // MUL, MULH, MULHSU
         2'b11              : op1, // MULHU
         default            : 0,
     };
     let mu_op2: logic<MUL_OP_WIDTH> = case funct3[1:0] {
-        2'b00, 2'b01: abs::<XLEN>(if is_op32 ? sext::<32, XLEN>(op2[31:0]) : op2), // MUL, MULH, MULW
+        2'b00, 2'b01: abs::<XLEN>(op2), // MUL, MULH
         2'b11, 2'b10: op2, // MULHU, MULHSU
         default     : 0,
     };
-    let mu_high: logic = funct3[1:0] != 2'b00;
+    let mwu_op1: logic<MULW_OP_WIDTH> = abs::<MULW_OP_WIDTH>(op1[31:0]);
+    let mwu_op2: logic<MULW_OP_WIDTH> = abs::<MULW_OP_WIDTH>(op2[31:0]);
+    let mu_high: logic                = funct3[1:0] != 2'b00;
 
     inst mu: mulunit #(
         WIDTH: MUL_OP_WIDTH,
     ) (
-        clk                               ,
-        rst                               ,
-        valid   : ready && valid && is_mul,
-        op1     : mu_op1                  ,
-        op2     : mu_op2                  ,
-        high    : mu_high                 ,
-        rvalid  : mu_rvalid               ,
-        result  : mu_result               ,
-        low_zero: mu_low_zero             ,
+        clk                                           ,
+        rst                                           ,
+        valid   : ready && valid && is_mul && !is_op32,
+        op1     : mu_op1                              ,
+        op2     : mu_op2                              ,
+        high    : mu_high                             ,
+        rvalid  : mu_rvalid                           ,
+        result  : mu_result                           ,
+        low_zero: mu_low_zero                         ,
     );
+
+    inst mwu: mulunit #(
+        WIDTH: 32,
+    ) (
+        clk                                          ,
+        rst                                          ,
+        valid   : ready && valid && is_mul && is_op32,
+        op1     : mwu_op1                            ,
+        op2     : mwu_op2                            ,
+        high    : 0                                  ,
+        rvalid  : mwu_rvalid                         ,
+        result  : mwu_result                         ,
+        low_zero: _                                  ,
+    );
+
+    let mu_rvalid_selected  : logic       = if is_op32_saved ? mwu_rvalid : mu_rvalid;
+    let mu_result_selected  : logic<XLEN> = if is_op32_saved ? {1'b0 repeat XLEN - 32, mwu_result} : mu_result;
+    let mu_low_zero_selected: logic       = if is_op32_saved ? mwu_result == 0 : mu_low_zero;
 
     // divider unit
     const DIV_WIDTH: u32 = XLEN;
@@ -164,15 +187,19 @@ module muldivunit (
                         }
                     }
                 }
-                State::WaitValid: if is_mul && mu_rvalid {
+                State::WaitValid: if is_mul && mu_rvalid_selected {
                     let negate_carry  : logic<XLEN> = if funct3_saved[1:0] == 2'b00 ?
                         1
                     :
-                        {1'b0 repeat XLEN - 1, mu_low_zero}
+                        {1'b0 repeat XLEN - 1, mu_low_zero_selected}
                     ;
-                    let negated_result: logic<XLEN> = ~mu_result + negate_carry;
-                    let res_signed    : logic<XLEN> = if op1sign_saved != op2sign_saved ? negated_result : mu_result;
-                    let res_mulhsu    : logic<XLEN> = if op1sign_saved ? negated_result : mu_result;
+                    let negated_result: logic<XLEN> = ~mu_result_selected + negate_carry;
+                    let res_signed    : logic<XLEN> = if op1sign_saved != op2sign_saved ?
+                        negated_result
+                    :
+                        mu_result_selected
+                    ;
+                    let res_mulhsu    : logic<XLEN> = if op1sign_saved ? negated_result : mu_result_selected;
 
                     state  = State::Idle;
                     rvalid = 1;
@@ -180,7 +207,7 @@ module muldivunit (
                         2'b00  : if is_op32_saved ? sext::<32, 64>(res_signed[31:0]) : res_signed, // MUL, MULW
                         2'b01  : res_signed, // MULH
                         2'b10  : res_mulhsu, // MULHSU
-                        2'b11  : mu_result, // MULHU
+                        2'b11  : mu_result_selected, // MULHU
                         default: 0,
                     };
                 } else if !is_mul && du_rvalid {
