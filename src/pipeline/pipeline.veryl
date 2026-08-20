@@ -20,6 +20,7 @@ package pipeline {
     }
 
     // ID -> EX
+    // TODO: ID -> Rn
     struct exq_type {
         addr            : Addr         ,
         bits            : Inst         ,
@@ -33,6 +34,16 @@ package pipeline {
         lane1_bits      : Inst         ,
         lane1_ctrl      : InstCtrl     ,
         lane1_imm       : UIntX        ,
+    }
+
+    // Rn -> EX
+    struct rmq_type {
+        ps1 : PhysRegAddr,
+        ps2 : PhysRegAddr,
+        addr: Addr       ,
+        bits: Inst       ,
+        ctrl: InstCtrl   ,
+        imm : UIntX      ,
     }
 
     // EX -> MEM

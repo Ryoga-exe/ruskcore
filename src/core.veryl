@@ -310,6 +310,12 @@ module core (
     }
 
     // ====================================================
+    // * Rn stage
+    // ====================================================
+
+    var rmt: PhysRegAddr [32];
+
+    // ====================================================
     // * EX stage
     // ====================================================
     let exs_valid           : logic    = exq_rvalid;
@@ -326,7 +332,7 @@ module core (
     let exs_lane1_imm       : UIntX    = exq_rdata.lane1_imm;
 
     // Registers
-    var regfile: UIntX [32];
+    var regfile: UIntX [64];
 
     // register number
     let exs_rs1_addr      : logic<5> = exs_inst_bits[19:15];
@@ -832,6 +838,10 @@ module core (
         // WB -> END
         wbq_rready = 1;
     }
+
+    // ====================================================
+    // * CM stage
+    // ====================================================
 
     // ====================================================
     // * Branch Predictor
