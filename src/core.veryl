@@ -76,6 +76,7 @@ module core (
     var if_predict_target   : Addr ;
     let if_predicted_pc_next: Addr  = if if_predict_valid && if_predict_taken ? if_predict_target : if_pc_next;
 
+    // TODO: rename (今考えたらひどい名前すぎる)
     let if_requested_lane0_predicted_taken: logic = if_prediction_valid_requested && if_prediction_slot_requested
         == if_pc_requested[2] && if_prediction_taken_requested;
     let if_requested_lane1_predicted_taken: logic = if_prediction_valid_requested && !if_pc_requested[2]
@@ -158,20 +159,21 @@ module core (
                 if_fifo_wvalid = 0;
             } else {
                 if if_is_requested && i_membus.rvalid {
-                    if_fifo_wvalid                       = 1;
-                    if_fifo_wdata.addr                   = if_pc_requested;
-                    if_fifo_wdata.bits                   = if if_pc_requested[2] == 0 ?
+                    if_fifo_wvalid                         = 1;
+                    if_fifo_wdata.slot[0].addr             = if_pc_requested;
+                    if_fifo_wdata.slot[0].bits             = if if_pc_requested[2] == 0 ?
                         i_membus.rdata[31:0]
                     :
                         i_membus.rdata[63:32]
                     ;
-                    if_fifo_wdata.predicted_taken        = if_requested_lane0_predicted_taken;
-                    if_fifo_wdata.predicted_target       = if_prediction_target_requested;
-                    if_fifo_wdata.lane1_valid            = if_requested_lane1_valid;
-                    if_fifo_wdata.lane1_addr             = if_pc_requested + 4;
-                    if_fifo_wdata.lane1_bits             = i_membus.rdata[63:32];
-                    if_fifo_wdata.lane1_predicted_taken  = if_requested_lane1_predicted_taken;
-                    if_fifo_wdata.lane1_predicted_target = if_prediction_target_requested;
+                    if_fifo_wdata.slot[0].predicted_taken  = if_requested_lane0_predicted_taken;
+                    if_fifo_wdata.slot[0].predicted_target = if_prediction_target_requested;
+
+                    if_fifo_wdata.slot[1].valid            = if_requested_lane1_valid;
+                    if_fifo_wdata.slot[1].addr             = if_pc_requested + 4;
+                    if_fifo_wdata.slot[1].bits             = i_membus.rdata[63:32];
+                    if_fifo_wdata.slot[1].predicted_taken  = if_requested_lane1_predicted_taken;
+                    if_fifo_wdata.slot[1].predicted_target = if_prediction_target_requested;
                     #[ifdef(KONATA_TRACE)]
                     block {
                         if_trace_wdata       = trace_next_id;
@@ -197,8 +199,8 @@ module core (
     var ids_deferred_predicted_target: Addr ;
 
     let ids_valid     : logic    = ids_deferred_valid || if_fifo_rvalid;
-    let ids_pc        : Addr     = if ids_deferred_valid ? ids_deferred_addr : if_fifo_rdata.addr;
-    let ids_inst_bits : Inst     = if ids_deferred_valid ? ids_deferred_bits : if_fifo_rdata.bits;
+    let ids_pc        : Addr     = if ids_deferred_valid ? ids_deferred_addr : if_fifo_rdata.slot[0].addr;
+    let ids_inst_bits : Inst     = if ids_deferred_valid ? ids_deferred_bits : if_fifo_rdata.slot[0].bits;
     var ids_inst_valid: logic   ;
     var ids_ctrl      : InstCtrl;
     var ids_imm       : UIntX   ;
@@ -214,17 +216,19 @@ module core (
         imm  : ids_imm       ,
     );
 
+    // TODO: 名前変えるべきかも
     inst lane1_decoder: inst_decoder (
-        bits : if_fifo_rdata.lane1_bits,
-        valid: ids_lane1_inst_valid    ,
-        ctrl : ids_lane1_ctrl          ,
-        imm  : ids_lane1_imm           ,
+        bits : if_fifo_rdata.slot[1].bits,
+        valid: ids_lane1_inst_valid      ,
+        ctrl : ids_lane1_ctrl            ,
+        imm  : ids_lane1_imm             ,
     );
 
+    // TODO: 名前変えるべきかも
     let ids_rd_addr       : logic<5> = ids_inst_bits[11:7];
-    let ids_lane1_rs1_addr: logic<5> = if_fifo_rdata.lane1_bits[19:15];
-    let ids_lane1_rs2_addr: logic<5> = if_fifo_rdata.lane1_bits[24:20];
-    let ids_lane1_rd_addr : logic<5> = if_fifo_rdata.lane1_bits[11:7];
+    let ids_lane1_rs1_addr: logic<5> = if_fifo_rdata.slot[1].bits[19:15];
+    let ids_lane1_rs2_addr: logic<5> = if_fifo_rdata.slot[1].bits[24:20];
+    let ids_lane1_rd_addr : logic<5> = if_fifo_rdata.slot[1].bits[11:7];
 
     let ids_lane1_executable: logic = ids_lane1_inst_valid && ids_lane1_ctrl.rwb_en && !inst_is_memop(ids_lane1_ctrl)
         && !ids_lane1_ctrl.is_csr && !ids_lane1_ctrl.is_jump && !inst_is_br(ids_lane1_ctrl);
@@ -233,7 +237,7 @@ module core (
             && ids_rd_addr == ids_lane1_rs2_addr);
     let ids_lane1_waw       : logic = ids_ctrl.rwb_en && ids_rd_addr != 0 && ids_lane1_ctrl.rwb_en && ids_rd_addr
         == ids_lane1_rd_addr;
-    let ids_dual_issue      : logic = !ids_deferred_valid && if_fifo_rdata.lane1_valid && ids_inst_valid
+    let ids_dual_issue      : logic = !ids_deferred_valid && if_fifo_rdata.slot[1].valid && ids_inst_valid
         && !ids_ctrl.is_csr && ids_lane1_executable && !ids_lane1_raw && !ids_lane1_waw;
 
     always_ff {
@@ -252,12 +256,12 @@ module core (
         } else if exq_wready {
             if ids_deferred_valid {
                 ids_deferred_valid = 0;
-            } else if if_fifo_rvalid && if_fifo_rready && if_fifo_rdata.lane1_valid && !ids_dual_issue {
+            } else if if_fifo_rvalid && if_fifo_rready && if_fifo_rdata.slot[1].valid && !ids_dual_issue {
                 ids_deferred_valid            = 1;
-                ids_deferred_addr             = if_fifo_rdata.lane1_addr;
-                ids_deferred_bits             = if_fifo_rdata.lane1_bits;
-                ids_deferred_predicted_taken  = if_fifo_rdata.lane1_predicted_taken;
-                ids_deferred_predicted_target = if_fifo_rdata.lane1_predicted_target;
+                ids_deferred_addr             = if_fifo_rdata.slot[1].addr;
+                ids_deferred_bits             = if_fifo_rdata.slot[1].bits;
+                ids_deferred_predicted_taken  = if_fifo_rdata.slot[1].predicted_taken;
+                ids_deferred_predicted_target = if_fifo_rdata.slot[1].predicted_target;
                 #[ifdef(KONATA_TRACE)]
                 block {
                     ids_deferred_trace_id = id_lane1_trace_id;
@@ -277,16 +281,16 @@ module core (
         exq_wdata.predicted_taken  = if ids_deferred_valid ?
             ids_deferred_predicted_taken
         :
-            if_fifo_rdata.predicted_taken
+            if_fifo_rdata.slot[0].predicted_taken
         ;
         exq_wdata.predicted_target = if ids_deferred_valid ?
             ids_deferred_predicted_target
         :
-            if_fifo_rdata.predicted_target
+            if_fifo_rdata.slot[0].predicted_target
         ;
         exq_wdata.lane1_valid      = ids_dual_issue;
-        exq_wdata.lane1_addr       = if_fifo_rdata.lane1_addr;
-        exq_wdata.lane1_bits       = if_fifo_rdata.lane1_bits;
+        exq_wdata.lane1_addr       = if_fifo_rdata.slot[1].addr;
+        exq_wdata.lane1_bits       = if_fifo_rdata.slot[1].bits;
         exq_wdata.lane1_ctrl       = ids_lane1_ctrl;
         exq_wdata.lane1_imm        = ids_lane1_imm;
         // exception
@@ -313,7 +317,7 @@ module core (
     // * Rn stage
     // ====================================================
 
-    var rmt: PhysRegAddr [32];
+    // var rmt: PhysRegAddr [32];
 
     // ====================================================
     // * EX stage
@@ -332,7 +336,8 @@ module core (
     let exs_lane1_imm       : UIntX    = exq_rdata.lane1_imm;
 
     // Registers
-    var regfile: UIntX [64];
+    var regfile: UIntX [32];
+    // var regfile: UIntX [64];
 
     // register number
     let exs_rs1_addr      : logic<5> = exs_inst_bits[19:15];
@@ -840,7 +845,7 @@ module core (
     }
 
     // ====================================================
-    // * CM stage
+    // * Cm stage
     // ====================================================
 
     // ====================================================
@@ -990,9 +995,9 @@ module core (
                 }
             }
             if !fetch_redirect && if_fifo_wvalid && if_fifo_wready {
-                util::konata_stage(1, if_trace_wdata, if_fifo_wdata.addr, if_fifo_wdata.bits);
-                if if_fifo_wdata.lane1_valid {
-                    util::konata_stage(1, if_lane1_trace_wdata, if_fifo_wdata.lane1_addr, if_fifo_wdata.lane1_bits);
+                util::konata_stage(1, if_trace_wdata, if_fifo_wdata.slot[0].addr, if_fifo_wdata.slot[0].bits);
+                if if_fifo_wdata.slot[1].valid {
+                    util::konata_stage(1, if_lane1_trace_wdata, if_fifo_wdata.slot[1].addr, if_fifo_wdata.slot[1].bits);
                 }
             }
             if !control_hazard && !mispredicted && exq_wvalid && exq_wready {
@@ -1003,7 +1008,12 @@ module core (
                     util::konata_stage(2, id_trace_id, ids_pc, ids_inst_bits);
                     ex_trace_id = id_trace_id;
                     if ids_dual_issue {
-                        util::konata_stage(2, id_lane1_trace_id, if_fifo_rdata.lane1_addr, if_fifo_rdata.lane1_bits);
+                        util::konata_stage(
+                            2,
+                            id_lane1_trace_id,
+                            if_fifo_rdata.slot[1].addr,
+                            if_fifo_rdata.slot[1].bits,
+                        );
                         ex_lane1_trace_id = id_lane1_trace_id;
                     }
                 }
@@ -1062,7 +1072,7 @@ module core (
                 $display(" pc req : %h", if_pc_requested);
                 $display("ID ------");
                 if ids_valid {
-                    $display("  %h : %h", ids_pc, if_fifo_rdata.bits);
+                    $display("  %h : %h", ids_pc, if_fifo_rdata.slot[0].bits);
                     $display("  itype : %b", ids_ctrl.itype);
                     $display("  imm   : %h", ids_imm);
                 }

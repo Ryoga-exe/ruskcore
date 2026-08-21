@@ -2,21 +2,34 @@ import eei::*;
 import corectrl::*;
 
 package pipeline {
+    const ISSUE_WIDTH: u32 = 2;
+
+    struct fetched_slot {
+        valid           : logic,
+        addr            : Addr ,
+        bits            : Inst ,
+        predicted_taken : logic,
+        predicted_target: Addr ,
+    }
+
     // ====================================================
     // * FIFO types
     // ====================================================
 
     // IF -> ID
+    // struct if_fifo_type {
+    //     addr                  : Addr ,
+    //     bits                  : Inst ,
+    //     predicted_taken       : logic,
+    //     predicted_target      : Addr ,
+    //     lane1_valid           : logic,
+    //     lane1_addr            : Addr ,
+    //     lane1_bits            : Inst ,
+    //     lane1_predicted_taken : logic,
+    //     lane1_predicted_target: Addr ,
+    // }
     struct if_fifo_type {
-        addr                  : Addr ,
-        bits                  : Inst ,
-        predicted_taken       : logic,
-        predicted_target      : Addr ,
-        lane1_valid           : logic,
-        lane1_addr            : Addr ,
-        lane1_bits            : Inst ,
-        lane1_predicted_taken : logic,
-        lane1_predicted_target: Addr ,
+        slot: fetched_slot<ISSUE_WIDTH>,
     }
 
     // ID -> EX
@@ -36,7 +49,7 @@ package pipeline {
         lane1_imm       : UIntX        ,
     }
 
-    // Rn -> EX
+    // TODO: Rn -> EX
     struct rmq_type {
         ps1 : PhysRegAddr,
         ps2 : PhysRegAddr,
