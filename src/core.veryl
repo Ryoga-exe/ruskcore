@@ -591,26 +591,34 @@ module core (
 
     always_comb {
         // EX -> MEM
-        exq_rready                  = memq_wready && !exs_stall;
-        memq_wvalid                 = exs_valid && !exs_stall;
-        memq_wdata.addr             = exq_rdata.slot[0].addr;
-        memq_wdata.bits             = exq_rdata.slot[0].bits;
-        memq_wdata.ctrl             = exq_rdata.slot[0].ctrl;
-        memq_wdata.imm              = exq_rdata.slot[0].imm;
-        memq_wdata.rs1_addr         = exs_rs1_addr;
-        memq_wdata.rs1_data         = exs_rs1_data;
-        memq_wdata.rs2_data         = exs_rs2_data;
-        memq_wdata.alu_result       = if exs_ctrl.is_muldiv ? exs_muldiv_result : exs_alu_result;
-        memq_wdata.br_taken         = exs_ctrl.is_jump || inst_is_br(exs_ctrl) && exs_brunit_take;
-        memq_wdata.jump_addr        = if inst_is_br(exs_ctrl) ? exs_pc + exs_imm : exs_alu_result & ~1;
-        memq_wdata.lane1_valid      = 0;
-        memq_wdata.lane1_addr       = exq_rdata.slot[1].addr;
-        memq_wdata.lane1_bits       = exq_rdata.slot[1].bits;
-        memq_wdata.lane1_ctrl       = exq_rdata.slot[1].ctrl;
-        memq_wdata.lane1_imm        = exq_rdata.slot[1].imm;
-        memq_wdata.lane1_alu_result = exs_lane1_result;
+        exq_rready                    = memq_wready && !exs_stall;
+        memq_wvalid                   = exs_valid && !exs_stall;
+        memq_wdata.slot[0].valid      = exs_valid;
+        memq_wdata.slot[0].addr       = exq_rdata.slot[0].addr;
+        memq_wdata.slot[0].bits       = exq_rdata.slot[0].bits;
+        memq_wdata.slot[0].ctrl       = exq_rdata.slot[0].ctrl;
+        memq_wdata.slot[0].imm        = exq_rdata.slot[0].imm;
+        memq_wdata.slot[0].rs1_addr   = exs_rs1_addr;
+        memq_wdata.slot[0].rs1_data   = exs_rs1_data;
+        memq_wdata.slot[0].rs2_data   = exs_rs2_data;
+        memq_wdata.slot[0].alu_result = if exs_ctrl.is_muldiv ? exs_muldiv_result : exs_alu_result;
+        memq_wdata.slot[0].br_taken   = exs_ctrl.is_jump || inst_is_br(exs_ctrl) && exs_brunit_take;
+        memq_wdata.slot[0].jump_addr  = if inst_is_br(exs_ctrl) ? exs_pc + exs_imm : exs_alu_result & ~1;
+        memq_wdata.slot[1].valid      = 0;
+        memq_wdata.slot[1].addr       = exq_rdata.slot[1].addr;
+        memq_wdata.slot[1].bits       = exq_rdata.slot[1].bits;
+        memq_wdata.slot[1].ctrl       = exq_rdata.slot[1].ctrl;
+        memq_wdata.slot[1].imm        = exq_rdata.slot[1].imm;
+        memq_wdata.slot[1].expt       = exq_rdata.slot[1].expt;
+        memq_wdata.slot[1].alu_result = exs_lane1_result;
+        memq_wdata.slot[1].rs1_addr   = exs_lane1_rs1_addr;
+        memq_wdata.slot[1].rs1_data   = exs_lane1_rs1_data;
+        memq_wdata.slot[1].rs2_data   = exs_lane1_rs2_data;
+        memq_wdata.slot[1].br_taken   = 0;
+        memq_wdata.slot[1].jump_addr  = 0;
         // exception
-        let instruction_address_misaligned: logic = memq_wdata.br_taken && memq_wdata.jump_addr[1:0] != 2'b00;
+        let instruction_address_misaligned: logic = memq_wdata.slot[0].br_taken && memq_wdata.slot[0].jump_addr[1:0]
+            != 2'b00;
         let memaddr                       : Addr  = if exs_ctrl.is_amo ? exs_rs1_data : exs_alu_result;
         let loadstore_address_misaligned  : logic = inst_is_memop(exs_ctrl)
             && case exs_ctrl.funct3[1:0] {
@@ -620,38 +628,38 @@ module core (
                 2'b11  : memaddr[2:0] != 3'b0, // D
                 default: 1'b0,
             };
-        memq_wdata.expt = exq_rdata.slot[0].expt;
+        memq_wdata.slot[0].expt = exq_rdata.slot[0].expt;
         if !exq_rdata.slot[0].expt.valid {
             if instruction_address_misaligned {
-                memq_wdata.expt.valid = 1;
-                memq_wdata.expt.cause = CsrCause::INSTRUCTION_ADDRESS_MISALIGNED;
-                memq_wdata.expt.value = memq_wdata.jump_addr;
+                memq_wdata.slot[0].expt.valid = 1;
+                memq_wdata.slot[0].expt.cause = CsrCause::INSTRUCTION_ADDRESS_MISALIGNED;
+                memq_wdata.slot[0].expt.value = memq_wdata.slot[0].jump_addr;
             } else if loadstore_address_misaligned {
-                memq_wdata.expt.valid = 1;
-                memq_wdata.expt.cause = if exs_ctrl.is_load ?
+                memq_wdata.slot[0].expt.valid = 1;
+                memq_wdata.slot[0].expt.cause = if exs_ctrl.is_load ?
                     CsrCause::LOAD_ADDRESS_MISALIGNED
                 :
                     CsrCause::STORE_AMO_ADDRESS_MISALIGNED
                 ;
-                memq_wdata.expt.value = exs_alu_result;
+                memq_wdata.slot[0].expt.value = exs_alu_result;
             }
         }
-        memq_wdata.lane1_valid = exs_lane1_valid && !memq_wdata.expt.valid && !exs_actual_taken;
+        memq_wdata.slot[1].valid = exs_lane1_valid && !memq_wdata.slot[0].expt.valid && !exs_actual_taken;
     }
 
     // ====================================================
     // * MEM stage
     // ====================================================
     var mems_is_new         : logic           ;
-    let mems_valid          : logic            = memq_rvalid;
-    let mems_pc             : Addr             = memq_rdata.addr;
-    let mems_inst_bits      : Inst             = memq_rdata.bits;
-    let mems_ctrl           : InstCtrl         = memq_rdata.ctrl;
-    let mems_expt           : ExceptionInfo    = memq_rdata.expt;
+    let mems_valid          : logic            = memq_rvalid && memq_rdata.slot[0].valid;
+    let mems_pc             : Addr             = memq_rdata.slot[0].addr;
+    let mems_inst_bits      : Inst             = memq_rdata.slot[0].bits;
+    let mems_ctrl           : InstCtrl         = memq_rdata.slot[0].ctrl;
+    let mems_expt           : ExceptionInfo    = memq_rdata.slot[0].expt;
     let mems_rd_addr        : logic        <5> = mems_inst_bits[11:7];
-    let mems_lane1_valid    : logic            = memq_rvalid && memq_rdata.lane1_valid;
-    let mems_lane1_inst_bits: Inst             = memq_rdata.lane1_bits;
-    let mems_lane1_ctrl     : InstCtrl         = memq_rdata.lane1_ctrl;
+    let mems_lane1_valid    : logic            = memq_rvalid && memq_rdata.slot[1].valid;
+    let mems_lane1_inst_bits: Inst             = memq_rdata.slot[1].bits;
+    let mems_lane1_ctrl     : InstCtrl         = memq_rdata.slot[1].ctrl;
     let mems_lane1_rd_addr  : logic        <5> = mems_lane1_inst_bits[11:7];
 
     always_ff {
@@ -670,7 +678,7 @@ module core (
     // Memory
     var memu_rdata: UIntX;
     var memu_stall: logic;
-    let memu_addr : Addr  = if mems_ctrl.is_amo ? memq_rdata.rs1_data : memq_rdata.alu_result;
+    let memu_addr : Addr  = if mems_ctrl.is_amo ? memq_rdata.slot[0].rs1_data : memq_rdata.slot[0].alu_result;
 
     inst memu: memunit (
         clk                                   ,
@@ -679,7 +687,7 @@ module core (
         is_new: mems_is_new                   ,
         ctrl  : mems_ctrl                     ,
         addr  : memu_addr                     ,
-        rs2   : memq_rdata.rs2_data           ,
+        rs2   : memq_rdata.slot[0].rs2_data   ,
         rdata : memu_rdata                    ,
         stall : memu_stall                    ,
         membus: d_membus                      ,
@@ -697,39 +705,39 @@ module core (
     var minstret: UInt64;
 
     inst csru: csrunit (
-        clk                                 ,
-        rst                                 ,
-        valid        : mems_valid           ,
-        pc           : mems_pc              ,
-        inst_bits    : mems_inst_bits       ,
-        ctrl         : mems_ctrl            ,
-        expt_info    : mems_expt            ,
-        rd_addr      : mems_rd_addr         ,
-        csr_addr     : mems_inst_bits[31:20],
-        rs1_addr     : memq_rdata.rs1_addr  ,
-        rs1_data     : memq_rdata.rs1_data  ,
-        rdata        : csru_rdata           ,
-        raise_trap   : csru_raise_trap      ,
-        trap_vector  : csru_trap_vector     ,
-        trap_return  : csru_trap_return     ,
-        mcycle                              ,
-        minstret                            ,
-        counter_write: csru_counter_write   ,
-        counter_wdata: csru_counter_wdata   ,
-        led                                 ,
+        clk                                       ,
+        rst                                       ,
+        valid        : mems_valid                 ,
+        pc           : mems_pc                    ,
+        inst_bits    : mems_inst_bits             ,
+        ctrl         : mems_ctrl                  ,
+        expt_info    : mems_expt                  ,
+        rd_addr      : mems_rd_addr               ,
+        csr_addr     : mems_inst_bits[31:20]      ,
+        rs1_addr     : memq_rdata.slot[0].rs1_addr,
+        rs1_data     : memq_rdata.slot[0].rs1_data,
+        rdata        : csru_rdata                 ,
+        raise_trap   : csru_raise_trap            ,
+        trap_vector  : csru_trap_vector           ,
+        trap_return  : csru_trap_return           ,
+        mcycle                                    ,
+        minstret                                  ,
+        counter_write: csru_counter_write         ,
+        counter_wdata: csru_counter_wdata         ,
+        led                                       ,
     );
 
     let mems_wb_data: UIntX = switch {
-        mems_ctrl.is_lui                     : memq_rdata.imm,
+        mems_ctrl.is_lui                     : memq_rdata.slot[0].imm,
         mems_ctrl.is_jump                    : mems_pc + 4,
         mems_ctrl.is_load || mems_ctrl.is_amo: memu_rdata,
         mems_ctrl.is_csr                     : csru_rdata,
-        default                              : memq_rdata.alu_result,
+        default                              : memq_rdata.slot[0].alu_result,
     };
 
     // Hazard
     assign control_hazard         = mems_valid && csru_raise_trap;
-    assign control_hazard_pc_next = if csru_raise_trap ? csru_trap_vector : memq_rdata.jump_addr;
+    assign control_hazard_pc_next = if csru_raise_trap ? csru_trap_vector : memq_rdata.slot[0].jump_addr;
 
     // Register Forwarding (MEM -> EX)
     let mems_wb_ready  : logic = !(mems_ctrl.is_load || mems_ctrl.is_amo) || !memu_stall;
@@ -743,7 +751,7 @@ module core (
     assign mem_lane1_forward = forwarding'{
         valid: mems_lane1_valid && mems_lane1_ctrl.rwb_en && mems_lane1_rd_addr != 0,
         addr : mems_lane1_rd_addr                                                   ,
-        data : memq_rdata.lane1_alu_result                                          ,
+        data : memq_rdata.slot[1].alu_result                                        ,
     };
 
     assign exs_mem_data_hazard = mems_will_write && !mems_wb_ready
@@ -753,59 +761,65 @@ module core (
 
     always_comb {
         // MEM -> WB
-        memq_rready                = wbq_wready && !memu_stall;
-        wbq_wvalid                 = memq_rvalid && !memu_stall;
-        wbq_wdata.addr             = memq_rdata.addr;
-        wbq_wdata.bits             = memq_rdata.bits;
-        wbq_wdata.ctrl             = memq_rdata.ctrl;
-        wbq_wdata.imm              = memq_rdata.imm;
-        wbq_wdata.alu_result       = memq_rdata.alu_result;
-        wbq_wdata.mem_rdata        = memu_rdata;
-        wbq_wdata.csr_rdata        = csru_rdata;
-        wbq_wdata.counter_write    = csru_counter_write;
-        wbq_wdata.counter_wdata    = csru_counter_wdata;
-        wbq_wdata.raise_trap       = csru_raise_trap && !csru_trap_return;
-        wbq_wdata.lane1_valid      = memq_rdata.lane1_valid && !csru_raise_trap;
-        wbq_wdata.lane1_addr       = memq_rdata.lane1_addr;
-        wbq_wdata.lane1_bits       = memq_rdata.lane1_bits;
-        wbq_wdata.lane1_ctrl       = memq_rdata.lane1_ctrl;
-        wbq_wdata.lane1_imm        = memq_rdata.lane1_imm;
-        wbq_wdata.lane1_alu_result = memq_rdata.lane1_alu_result;
+        memq_rready                     = wbq_wready && !memu_stall;
+        wbq_wvalid                      = mems_valid && !memu_stall;
+        wbq_wdata.slot[0].valid         = mems_valid;
+        wbq_wdata.slot[0].addr          = memq_rdata.slot[0].addr;
+        wbq_wdata.slot[0].bits          = memq_rdata.slot[0].bits;
+        wbq_wdata.slot[0].ctrl          = memq_rdata.slot[0].ctrl;
+        wbq_wdata.slot[0].imm           = memq_rdata.slot[0].imm;
+        wbq_wdata.slot[0].alu_result    = memq_rdata.slot[0].alu_result;
+        wbq_wdata.slot[0].mem_rdata     = memu_rdata;
+        wbq_wdata.slot[0].csr_rdata     = csru_rdata;
+        wbq_wdata.slot[0].counter_write = csru_counter_write;
+        wbq_wdata.slot[0].counter_wdata = csru_counter_wdata;
+        wbq_wdata.slot[0].raise_trap    = csru_raise_trap && !csru_trap_return;
+        wbq_wdata.slot[1].valid         = memq_rdata.slot[1].valid && !csru_raise_trap;
+        wbq_wdata.slot[1].addr          = memq_rdata.slot[1].addr;
+        wbq_wdata.slot[1].bits          = memq_rdata.slot[1].bits;
+        wbq_wdata.slot[1].ctrl          = memq_rdata.slot[1].ctrl;
+        wbq_wdata.slot[1].imm           = memq_rdata.slot[1].imm;
+        wbq_wdata.slot[1].alu_result    = memq_rdata.slot[1].alu_result;
+        wbq_wdata.slot[1].mem_rdata     = 0;
+        wbq_wdata.slot[1].csr_rdata     = 0;
+        wbq_wdata.slot[1].counter_write = 0;
+        wbq_wdata.slot[1].counter_wdata = 0;
+        wbq_wdata.slot[1].raise_trap    = 0;
     }
 
     // ====================================================
     // * WB stage
     // ====================================================
-    let wbs_valid          : logic    = wbq_rvalid;
-    let wbs_pc             : Addr     = wbq_rdata.addr;
-    let wbs_inst_bits      : Inst     = wbq_rdata.bits;
-    let wbs_ctrl           : InstCtrl = wbq_rdata.ctrl;
-    let wbs_imm            : UIntX    = wbq_rdata.imm;
-    let wbs_lane1_valid    : logic    = wbq_rvalid && wbq_rdata.lane1_valid;
-    let wbs_lane1_inst_bits: Inst     = wbq_rdata.lane1_bits;
-    let wbs_lane1_ctrl     : InstCtrl = wbq_rdata.lane1_ctrl;
+    let wbs_valid          : logic    = wbq_rvalid && wbq_rdata.slot[0].valid;
+    let wbs_pc             : Addr     = wbq_rdata.slot[0].addr;
+    let wbs_inst_bits      : Inst     = wbq_rdata.slot[0].bits;
+    let wbs_ctrl           : InstCtrl = wbq_rdata.slot[0].ctrl;
+    let wbs_imm            : UIntX    = wbq_rdata.slot[0].imm;
+    let wbs_lane1_valid    : logic    = wbq_rvalid && wbq_rdata.slot[1].valid;
+    let wbs_lane1_inst_bits: Inst     = wbq_rdata.slot[1].bits;
+    let wbs_lane1_ctrl     : InstCtrl = wbq_rdata.slot[1].ctrl;
 
     let wbs_rd_addr      : logic<5>  = wbs_inst_bits[11:7];
-    let wbs_retire       : logic     = wbq_rvalid && wbq_rready && !wbq_rdata.raise_trap;
-    let wbs_counter_write: logic     = wbs_retire && wbq_rdata.counter_write;
+    let wbs_retire       : logic     = wbs_valid && wbq_rready && !wbq_rdata.slot[0].raise_trap;
+    let wbs_counter_write: logic     = wbs_retire && wbq_rdata.slot[0].counter_write;
     let wbs_csr_addr     : logic<12> = wbs_inst_bits[31:20];
     let wbs_lane1_rd_addr: logic<5>  = wbs_lane1_inst_bits[11:7];
     let wbs_lane1_retire : logic     = wbs_lane1_valid && wbq_rready;
     let wbs_wb_data      : UIntX     = switch {
         wbs_ctrl.is_lui                    : wbs_imm,
         wbs_ctrl.is_jump                   : wbs_pc + 4,
-        wbs_ctrl.is_load || wbs_ctrl.is_amo: wbq_rdata.mem_rdata,
-        wbs_ctrl.is_csr                    : wbq_rdata.csr_rdata,
-        default                            : wbq_rdata.alu_result,
+        wbs_ctrl.is_load || wbs_ctrl.is_amo: wbq_rdata.slot[0].mem_rdata,
+        wbs_ctrl.is_csr                    : wbq_rdata.slot[0].csr_rdata,
+        default                            : wbq_rdata.slot[0].alu_result,
     };
 
     always_ff {
         // write back
-        if wbs_valid && wbs_ctrl.rwb_en && !wbq_rdata.raise_trap {
+        if wbs_valid && wbs_ctrl.rwb_en && !wbq_rdata.slot[0].raise_trap {
             regfile[wbs_rd_addr] = wbs_wb_data;
         }
         if wbs_lane1_valid && wbs_lane1_ctrl.rwb_en {
-            regfile[wbs_lane1_rd_addr] = wbq_rdata.lane1_alu_result;
+            regfile[wbs_lane1_rd_addr] = wbq_rdata.slot[1].alu_result;
         }
     }
 
@@ -815,13 +829,13 @@ module core (
             minstret = 0;
         } else {
             if wbs_counter_write && wbs_csr_addr == CsrAddr::MCYCLE {
-                mcycle = wbq_rdata.counter_wdata;
+                mcycle = wbq_rdata.slot[0].counter_wdata;
             } else {
                 mcycle += 1;
             }
 
             if wbs_counter_write && wbs_csr_addr == CsrAddr::MINSTRET {
-                minstret = wbq_rdata.counter_wdata;
+                minstret = wbq_rdata.slot[0].counter_wdata;
             } else {
                 case {wbs_lane1_retire, wbs_retire} {
                     2'b11       : minstret += 2;
@@ -834,14 +848,14 @@ module core (
 
     // Register Forwarding (WB -> EX)
     assign wb_forward       = forwarding'{
-        valid: wbs_valid && wbs_ctrl.rwb_en && !wbq_rdata.raise_trap && wbs_rd_addr != 0,
-        addr : wbs_rd_addr                                                              ,
-        data : wbs_wb_data                                                              ,
+        valid: wbs_valid && wbs_ctrl.rwb_en && !wbq_rdata.slot[0].raise_trap && wbs_rd_addr != 0,
+        addr : wbs_rd_addr                                                                      ,
+        data : wbs_wb_data                                                                      ,
     };
     assign wb_lane1_forward = forwarding'{
         valid: wbs_lane1_valid && wbs_lane1_ctrl.rwb_en && wbs_lane1_rd_addr != 0,
         addr : wbs_lane1_rd_addr                                                 ,
-        data : wbq_rdata.lane1_alu_result                                        ,
+        data : wbq_rdata.slot[1].alu_result                                      ,
     };
 
     always_comb {
@@ -1032,10 +1046,10 @@ module core (
                 }
             }
             if memq_rvalid && memq_rready {
-                util::konata_stage(4, mem_trace_id, memq_rdata.addr, memq_rdata.bits);
+                util::konata_stage(4, mem_trace_id, memq_rdata.slot[0].addr, memq_rdata.slot[0].bits);
                 wb_trace_id = mem_trace_id;
                 if mems_lane1_valid {
-                    util::konata_stage(4, mem_lane1_trace_id, memq_rdata.lane1_addr, memq_rdata.lane1_bits);
+                    util::konata_stage(4, mem_lane1_trace_id, memq_rdata.slot[1].addr, memq_rdata.slot[1].bits);
                     wb_lane1_trace_id = mem_lane1_trace_id;
                 }
             }
@@ -1047,7 +1061,7 @@ module core (
                 util::konata_flush(ex_trace_id);
             }
             if wbq_rvalid && wbq_rready {
-                util::konata_retire(wb_trace_id, wbq_rdata.raise_trap);
+                util::konata_retire(wb_trace_id, wbq_rdata.slot[0].raise_trap);
                 if wbs_lane1_valid {
                     util::konata_retire(wb_lane1_trace_id, 0);
                 }
@@ -1094,7 +1108,7 @@ module core (
                 }
                 $display("MEM -----");
                 if mems_valid {
-                    $display("  %h : %h", memq_rdata.addr, memq_rdata.bits);
+                    $display("  %h : %h", memq_rdata.slot[0].addr, memq_rdata.slot[0].bits);
                     $display("  mem stall : %b", memu_stall);
                     $display("  mem rdata : %h", memu_rdata);
                     if mems_ctrl.is_csr {
@@ -1102,13 +1116,13 @@ module core (
                         $display("  csr trap  : %b", csru_raise_trap);
                         $display("  csr vec   : %h", csru_trap_vector);
                     }
-                    if memq_rdata.br_taken {
-                        $display("  JUMP TO   : %h", memq_rdata.jump_addr);
+                    if memq_rdata.slot[0].br_taken {
+                        $display("  JUMP TO   : %h", memq_rdata.slot[0].jump_addr);
                     }
                 }
                 $display("WB ----");
                 if wbs_valid {
-                    $display("  %h : %h", wbq_rdata.addr, wbq_rdata.bits);
+                    $display("  %h : %h", wbq_rdata.slot[0].addr, wbq_rdata.slot[0].bits);
                     if wbs_ctrl.rwb_en {
                         $display("  reg[%d] <= %h", wbs_rd_addr, wbs_wb_data);
                     }
