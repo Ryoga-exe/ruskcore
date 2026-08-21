@@ -2,25 +2,18 @@ import eei::*;
 import corectrl::*;
 
 package pipeline {
-    // ====================================================
-    // * FIFO types
-    // ====================================================
+    const ISSUE_WIDTH: u32 = 2;
 
-    // IF -> ID
-    struct if_fifo_type {
-        addr                  : Addr ,
-        bits                  : Inst ,
-        predicted_taken       : logic,
-        predicted_target      : Addr ,
-        lane1_valid           : logic,
-        lane1_addr            : Addr ,
-        lane1_bits            : Inst ,
-        lane1_predicted_taken : logic,
-        lane1_predicted_target: Addr ,
+    struct fetched_slot {
+        valid           : logic,
+        addr            : Addr ,
+        bits            : Inst ,
+        predicted_taken : logic,
+        predicted_target: Addr ,
     }
 
-    // ID -> EX
-    struct exq_type {
+    struct decoded_slot {
+        valid           : logic        ,
         addr            : Addr         ,
         bits            : Inst         ,
         ctrl            : InstCtrl     ,
@@ -28,52 +21,70 @@ package pipeline {
         expt            : ExceptionInfo,
         predicted_taken : logic        ,
         predicted_target: Addr         ,
-        lane1_valid     : logic        ,
-        lane1_addr      : Addr         ,
-        lane1_bits      : Inst         ,
-        lane1_ctrl      : InstCtrl     ,
-        lane1_imm       : UIntX        ,
+    }
+
+    struct executed_slot {
+        valid     : logic        ,
+        addr      : Addr         ,
+        bits      : Inst         ,
+        ctrl      : InstCtrl     ,
+        imm       : UIntX        ,
+        expt      : ExceptionInfo,
+        alu_result: UIntX        ,
+        rs1_addr  : logic<5>     ,
+        rs1_data  : UIntX        ,
+        rs2_data  : UIntX        ,
+        br_taken  : logic        ,
+        jump_addr : Addr         ,
+    }
+
+    struct writeback_slot {
+        valid        : logic   ,
+        addr         : Addr    ,
+        bits         : Inst    ,
+        ctrl         : InstCtrl,
+        imm          : UIntX   ,
+        alu_result   : UIntX   ,
+        mem_rdata    : UIntX   ,
+        csr_rdata    : UIntX   ,
+        counter_write: logic   ,
+        counter_wdata: UInt64  ,
+        raise_trap   : logic   ,
+    }
+
+    // ====================================================
+    // * FIFO types
+    // ====================================================
+
+    // IF -> ID
+    struct if_fifo_type {
+        slot: fetched_slot<ISSUE_WIDTH>,
+    }
+
+    // ID -> EX
+    // TODO: ID -> Rn
+    struct exq_type {
+        slot: decoded_slot<ISSUE_WIDTH>,
+    }
+
+    // TODO: Rn -> EX
+    struct rmq_type {
+        ps1 : PhysRegAddr,
+        ps2 : PhysRegAddr,
+        addr: Addr       ,
+        bits: Inst       ,
+        ctrl: InstCtrl   ,
+        imm : UIntX      ,
     }
 
     // EX -> MEM
     struct memq_type {
-        addr            : Addr            ,
-        bits            : Inst            ,
-        ctrl            : InstCtrl        ,
-        imm             : UIntX           ,
-        expt            : ExceptionInfo   ,
-        alu_result      : UIntX           ,
-        rs1_addr        : logic        <5>,
-        rs1_data        : UIntX           ,
-        rs2_data        : UIntX           ,
-        br_taken        : logic           ,
-        jump_addr       : Addr            ,
-        lane1_valid     : logic           ,
-        lane1_addr      : Addr            ,
-        lane1_bits      : Inst            ,
-        lane1_ctrl      : InstCtrl        ,
-        lane1_imm       : UIntX           ,
-        lane1_alu_result: UIntX           ,
+        slot: executed_slot<ISSUE_WIDTH>,
     }
 
     // MEM -> WB
     struct wbq_type {
-        addr            : Addr    ,
-        bits            : Inst    ,
-        ctrl            : InstCtrl,
-        imm             : UIntX   ,
-        alu_result      : UIntX   ,
-        mem_rdata       : UIntX   ,
-        csr_rdata       : UIntX   ,
-        counter_write   : logic   ,
-        counter_wdata   : UInt64  ,
-        raise_trap      : logic   ,
-        lane1_valid     : logic   ,
-        lane1_addr      : Addr    ,
-        lane1_bits      : Inst    ,
-        lane1_ctrl      : InstCtrl,
-        lane1_imm       : UIntX   ,
-        lane1_alu_result: UIntX   ,
+        slot: writeback_slot<ISSUE_WIDTH>,
     }
 
     // Forwarding

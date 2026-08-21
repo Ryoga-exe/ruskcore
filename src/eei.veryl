@@ -12,6 +12,8 @@ package eei {
     type Inst   = logic       <ILEN>;
     type Addr   = logic       <XLEN>;
 
+    type PhysRegAddr = logic<6>;
+
     // memory bus
     const MEMBUS_DATA_WIDTH: u32 = 64;
 
