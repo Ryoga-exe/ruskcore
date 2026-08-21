@@ -12,29 +12,8 @@ package pipeline {
         predicted_target: Addr ,
     }
 
-    // ====================================================
-    // * FIFO types
-    // ====================================================
-
-    // IF -> ID
-    // struct if_fifo_type {
-    //     addr                  : Addr ,
-    //     bits                  : Inst ,
-    //     predicted_taken       : logic,
-    //     predicted_target      : Addr ,
-    //     lane1_valid           : logic,
-    //     lane1_addr            : Addr ,
-    //     lane1_bits            : Inst ,
-    //     lane1_predicted_taken : logic,
-    //     lane1_predicted_target: Addr ,
-    // }
-    struct if_fifo_type {
-        slot: fetched_slot<ISSUE_WIDTH>,
-    }
-
-    // ID -> EX
-    // TODO: ID -> Rn
-    struct exq_type {
+    struct decoded_slot {
+        valid           : logic        ,
         addr            : Addr         ,
         bits            : Inst         ,
         ctrl            : InstCtrl     ,
@@ -42,11 +21,21 @@ package pipeline {
         expt            : ExceptionInfo,
         predicted_taken : logic        ,
         predicted_target: Addr         ,
-        lane1_valid     : logic        ,
-        lane1_addr      : Addr         ,
-        lane1_bits      : Inst         ,
-        lane1_ctrl      : InstCtrl     ,
-        lane1_imm       : UIntX        ,
+    }
+
+    // ====================================================
+    // * FIFO types
+    // ====================================================
+
+    // IF -> ID
+    struct if_fifo_type {
+        slot: fetched_slot<ISSUE_WIDTH>,
+    }
+
+    // ID -> EX
+    // TODO: ID -> Rn
+    struct exq_type {
+        slot: decoded_slot<ISSUE_WIDTH>,
     }
 
     // TODO: Rn -> EX

@@ -160,6 +160,7 @@ module core (
             } else {
                 if if_is_requested && i_membus.rvalid {
                     if_fifo_wvalid                         = 1;
+                    if_fifo_wdata.slot[0].valid            = 1;
                     if_fifo_wdata.slot[0].addr             = if_pc_requested;
                     if_fifo_wdata.slot[0].bits             = if if_pc_requested[2] == 0 ?
                         i_membus.rdata[31:0]
@@ -272,44 +273,48 @@ module core (
 
     always_comb {
         // ID -> EX
-        if_fifo_rready             = exq_wready && !ids_deferred_valid;
-        exq_wvalid                 = ids_valid;
-        exq_wdata.addr             = ids_pc;
-        exq_wdata.bits             = ids_inst_bits;
-        exq_wdata.ctrl             = ids_ctrl;
-        exq_wdata.imm              = ids_imm;
-        exq_wdata.predicted_taken  = if ids_deferred_valid ?
+        if_fifo_rready                     = exq_wready && !ids_deferred_valid;
+        exq_wvalid                         = ids_valid;
+        exq_wdata.slot[0].valid            = ids_valid;
+        exq_wdata.slot[0].addr             = ids_pc;
+        exq_wdata.slot[0].bits             = ids_inst_bits;
+        exq_wdata.slot[0].ctrl             = ids_ctrl;
+        exq_wdata.slot[0].imm              = ids_imm;
+        exq_wdata.slot[0].predicted_taken  = if ids_deferred_valid ?
             ids_deferred_predicted_taken
         :
             if_fifo_rdata.slot[0].predicted_taken
         ;
-        exq_wdata.predicted_target = if ids_deferred_valid ?
+        exq_wdata.slot[0].predicted_target = if ids_deferred_valid ?
             ids_deferred_predicted_target
         :
             if_fifo_rdata.slot[0].predicted_target
         ;
-        exq_wdata.lane1_valid      = ids_dual_issue;
-        exq_wdata.lane1_addr       = if_fifo_rdata.slot[1].addr;
-        exq_wdata.lane1_bits       = if_fifo_rdata.slot[1].bits;
-        exq_wdata.lane1_ctrl       = ids_lane1_ctrl;
-        exq_wdata.lane1_imm        = ids_lane1_imm;
+        exq_wdata.slot[1].valid            = ids_dual_issue;
+        exq_wdata.slot[1].addr             = if_fifo_rdata.slot[1].addr;
+        exq_wdata.slot[1].bits             = if_fifo_rdata.slot[1].bits;
+        exq_wdata.slot[1].ctrl             = ids_lane1_ctrl;
+        exq_wdata.slot[1].imm              = ids_lane1_imm;
+        exq_wdata.slot[1].expt             = 0;
+        exq_wdata.slot[1].predicted_taken  = if_fifo_rdata.slot[1].predicted_taken;
+        exq_wdata.slot[1].predicted_target = if_fifo_rdata.slot[1].predicted_target;
         // exception
-        exq_wdata.expt = 0; // default
+        exq_wdata.slot[0].expt = 0; // default
         if !ids_inst_valid {
             // illegal instruction
-            exq_wdata.expt.valid = 1;
-            exq_wdata.expt.cause = CsrCause::ILLEGAL_INSTRUCTION;
-            exq_wdata.expt.value = {1'b0 repeat XLEN - ILEN, ids_inst_bits};
+            exq_wdata.slot[0].expt.valid = 1;
+            exq_wdata.slot[0].expt.cause = CsrCause::ILLEGAL_INSTRUCTION;
+            exq_wdata.slot[0].expt.value = {1'b0 repeat XLEN - ILEN, ids_inst_bits};
         } else if ids_inst_bits == 32'h00000073 {
             // ECALL
-            exq_wdata.expt.valid = 1;
-            exq_wdata.expt.cause = CsrCause::ENVIRONMENT_CALL_FROM_M_MODE;
-            exq_wdata.expt.value = 0;
+            exq_wdata.slot[0].expt.valid = 1;
+            exq_wdata.slot[0].expt.cause = CsrCause::ENVIRONMENT_CALL_FROM_M_MODE;
+            exq_wdata.slot[0].expt.value = 0;
         } else if ids_inst_bits == 32'h00100073 {
             // EBREAK
-            exq_wdata.expt.valid = 1;
-            exq_wdata.expt.cause = CsrCause::BREAKPOINT;
-            exq_wdata.expt.value = ids_pc;
+            exq_wdata.slot[0].expt.valid = 1;
+            exq_wdata.slot[0].expt.cause = CsrCause::BREAKPOINT;
+            exq_wdata.slot[0].expt.value = ids_pc;
         }
     }
 
@@ -322,18 +327,18 @@ module core (
     // ====================================================
     // * EX stage
     // ====================================================
-    let exs_valid           : logic    = exq_rvalid;
-    let exs_pc              : Addr     = exq_rdata.addr;
-    let exs_inst_bits       : Inst     = exq_rdata.bits;
-    let exs_ctrl            : InstCtrl = exq_rdata.ctrl;
-    let exs_imm             : UIntX    = exq_rdata.imm;
-    let exs_predicted_taken : logic    = exq_rdata.predicted_taken;
-    let exs_predicted_target: Addr     = exq_rdata.predicted_target;
-    let exs_lane1_valid     : logic    = exq_rvalid && exq_rdata.lane1_valid;
-    let exs_lane1_pc        : Addr     = exq_rdata.lane1_addr;
-    let exs_lane1_inst_bits : Inst     = exq_rdata.lane1_bits;
-    let exs_lane1_ctrl      : InstCtrl = exq_rdata.lane1_ctrl;
-    let exs_lane1_imm       : UIntX    = exq_rdata.lane1_imm;
+    let exs_valid           : logic    = exq_rvalid && exq_rdata.slot[0].valid;
+    let exs_pc              : Addr     = exq_rdata.slot[0].addr;
+    let exs_inst_bits       : Inst     = exq_rdata.slot[0].bits;
+    let exs_ctrl            : InstCtrl = exq_rdata.slot[0].ctrl;
+    let exs_imm             : UIntX    = exq_rdata.slot[0].imm;
+    let exs_predicted_taken : logic    = exq_rdata.slot[0].predicted_taken;
+    let exs_predicted_target: Addr     = exq_rdata.slot[0].predicted_target;
+    let exs_lane1_valid     : logic    = exq_rvalid && exq_rdata.slot[1].valid;
+    let exs_lane1_pc        : Addr     = exq_rdata.slot[1].addr;
+    let exs_lane1_inst_bits : Inst     = exq_rdata.slot[1].bits;
+    let exs_lane1_ctrl      : InstCtrl = exq_rdata.slot[1].ctrl;
+    let exs_lane1_imm       : UIntX    = exq_rdata.slot[1].imm;
 
     // Registers
     var regfile: UIntX [32];
@@ -587,11 +592,11 @@ module core (
     always_comb {
         // EX -> MEM
         exq_rready                  = memq_wready && !exs_stall;
-        memq_wvalid                 = exq_rvalid && !exs_stall;
-        memq_wdata.addr             = exq_rdata.addr;
-        memq_wdata.bits             = exq_rdata.bits;
-        memq_wdata.ctrl             = exq_rdata.ctrl;
-        memq_wdata.imm              = exq_rdata.imm;
+        memq_wvalid                 = exs_valid && !exs_stall;
+        memq_wdata.addr             = exq_rdata.slot[0].addr;
+        memq_wdata.bits             = exq_rdata.slot[0].bits;
+        memq_wdata.ctrl             = exq_rdata.slot[0].ctrl;
+        memq_wdata.imm              = exq_rdata.slot[0].imm;
         memq_wdata.rs1_addr         = exs_rs1_addr;
         memq_wdata.rs1_data         = exs_rs1_data;
         memq_wdata.rs2_data         = exs_rs2_data;
@@ -599,10 +604,10 @@ module core (
         memq_wdata.br_taken         = exs_ctrl.is_jump || inst_is_br(exs_ctrl) && exs_brunit_take;
         memq_wdata.jump_addr        = if inst_is_br(exs_ctrl) ? exs_pc + exs_imm : exs_alu_result & ~1;
         memq_wdata.lane1_valid      = 0;
-        memq_wdata.lane1_addr       = exq_rdata.lane1_addr;
-        memq_wdata.lane1_bits       = exq_rdata.lane1_bits;
-        memq_wdata.lane1_ctrl       = exq_rdata.lane1_ctrl;
-        memq_wdata.lane1_imm        = exq_rdata.lane1_imm;
+        memq_wdata.lane1_addr       = exq_rdata.slot[1].addr;
+        memq_wdata.lane1_bits       = exq_rdata.slot[1].bits;
+        memq_wdata.lane1_ctrl       = exq_rdata.slot[1].ctrl;
+        memq_wdata.lane1_imm        = exq_rdata.slot[1].imm;
         memq_wdata.lane1_alu_result = exs_lane1_result;
         // exception
         let instruction_address_misaligned: logic = memq_wdata.br_taken && memq_wdata.jump_addr[1:0] != 2'b00;
@@ -615,8 +620,8 @@ module core (
                 2'b11  : memaddr[2:0] != 3'b0, // D
                 default: 1'b0,
             };
-        memq_wdata.expt = exq_rdata.expt;
-        if !exq_rdata.expt.valid {
+        memq_wdata.expt = exq_rdata.slot[0].expt;
+        if !exq_rdata.slot[0].expt.valid {
             if instruction_address_misaligned {
                 memq_wdata.expt.valid = 1;
                 memq_wdata.expt.cause = CsrCause::INSTRUCTION_ADDRESS_MISALIGNED;
@@ -1019,7 +1024,7 @@ module core (
                 }
             }
             if !control_hazard && exq_rvalid && exq_rready {
-                util::konata_stage(3, ex_trace_id, exq_rdata.addr, exq_rdata.bits);
+                util::konata_stage(3, ex_trace_id, exq_rdata.slot[0].addr, exq_rdata.slot[0].bits);
                 mem_trace_id = ex_trace_id;
                 if exs_lane1_valid {
                     util::konata_stage(3, ex_lane1_trace_id, exs_lane1_pc, exs_lane1_inst_bits);
@@ -1078,7 +1083,7 @@ module core (
                 }
                 $display("EX -----");
                 if exs_valid {
-                    $display("  %h : %h", exq_rdata.addr, exq_rdata.bits);
+                    $display("  %h : %h", exq_rdata.slot[0].addr, exq_rdata.slot[0].bits);
                     $display("  op1     : %h", exs_op1);
                     $display("  op2     : %h", exs_op2);
                     $display("  alu     : %h", exs_alu_result);
